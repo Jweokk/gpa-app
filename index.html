@@ -448,7 +448,90 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   to { opacity: 1; transform: translateX(0); }
 }
 
-/* Voicetext hint */
+/* Batch Results */
+.batch-results {
+  margin-top: 16px;
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  max-height: 360px;
+  overflow-y: auto;
+}
+.batch-results::-webkit-scrollbar { width: 5px; }
+.batch-results::-webkit-scrollbar-thumb { background: var(--gray-300); border-radius: 3px; }
+.batch-header {
+  padding: 10px 14px;
+  background: var(--gray-50);
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.batch-item {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--gray-100);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.batch-item:last-child { border-bottom: none; }
+.batch-item:hover { background: var(--gray-50); }
+.batch-item .idx-badge {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.batch-item .idx-badge.ok { background: var(--success-bg); color: var(--success); }
+.batch-item .idx-badge.warn { background: var(--warning-bg); color: var(--warning); }
+.batch-item .idx-badge.err { background: var(--error-bg); color: var(--error); }
+.batch-item .spoken-text { color: var(--gray-500); font-size: 12px; }
+.batch-item .name-match { font-weight: 600; }
+.batch-item .score-val { font-weight: 600; margin-left: auto; }
+.batch-item .score-val.ok { color: var(--success); }
+.batch-item .score-val.warn { color: var(--warning); }
+.batch-item .cand-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.batch-item .cand-row button {
+  padding: 2px 10px;
+  border: 1px solid var(--gray-300);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.12s;
+}
+.batch-item .cand-row button:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.batch-actions {
+  padding: 10px 14px;
+  display: flex;
+  gap: 8px;
+  border-top: 1px solid var(--gray-200);
+  position: sticky;
+  bottom: 0;
+  background: #fff;
+}
+/* Clear transcript when showing results */
+.transcript-box.has-results { display: none; }
 .voicetext-hint {
   font-size: 13px;
   color: var(--gray-400);
@@ -563,9 +646,9 @@ const state = {
   fileName: '',
   recognizing: false,
   recognition: null,
-  speechTimeout: null,
-  pendingTranscript: '',
-  lastResult: null,    // {transcript, nameText, score, candidate, candidates}
+  accumulatedText: '',  // Batch speech accumulation
+  batchResults: [],     // [{idx, raw, nameText, score, status, match, candidates}]
+  lastResult: null,
   currentHighlight: null,
 };
 
@@ -920,7 +1003,7 @@ document.getElementById('undoBtn').addEventListener('click', () => {
   showToast(`撤销 ${s.name}`, 'warning');
 });
 
-// ─── Speech Recognition ────────────────────
+// ─── Speech Recognition (Batch Mode) ────────
 function initRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) {
@@ -933,9 +1016,6 @@ function initRecognition() {
   r.continuous = true;
   r.interimResults = true;
   r.maxAlternatives = 3;
-
-  let finalTranscript = '';
-  let lastProcessedIndex = 0;
 
   r.onresult = (event) => {
     let interim = '';
@@ -950,34 +1030,29 @@ function initRecognition() {
       }
     }
 
+    // Accumulate final text
+    if (final) {
+      state.accumulatedText += final;
+    }
+
     // Show live transcript
     const box = document.getElementById('transcriptBox');
     if (interim) {
-      box.innerHTML = `<span class="name-part">${escapeHtml(final)}</span> <span class="highlight">${escapeHtml(interim)}</span>`;
-    } else if (final) {
-      box.innerHTML = `<span class="name-part">${escapeHtml(final)}</span>`;
-    }
-
-    // Process on silence (debounce)
-    if (final) {
-      if (state.speechTimeout) clearTimeout(state.speechTimeout);
-      state.speechTimeout = setTimeout(() => {
-        processUtterance(final);
-        final = '';
-      }, 1200);
+      box.innerHTML = `<span class="name-part">${escapeHtml(state.accumulatedText)}</span><span class="highlight">${escapeHtml(interim)}</span>`;
+    } else if (state.accumulatedText) {
+      box.innerHTML = `<span class="name-part">${escapeHtml(state.accumulatedText)}</span>`;
     }
   };
 
   r.onerror = (event) => {
     console.error('Speech error:', event.error);
     if (event.error === 'no-speech') return;
-    showToast(`语音识别错误: ${event.error}`, 'error');
+    showToast('语音识别错误: ' + event.error, 'error');
     stopRecognition();
   };
 
-  r.onend = () => {
+  r.onend = function() {
     if (state.recognizing) {
-      // Auto-restart if we're supposed to be listening
       try { r.start(); } catch(e) {}
     }
   };
@@ -986,63 +1061,97 @@ function initRecognition() {
 }
 
 function escapeHtml(text) {
-  const el = document.createElement('span');
+  var el = document.createElement('span');
   el.textContent = text;
   return el.innerHTML;
 }
 
-function processUtterance(text) {
-  text = text.trim();
-  if (!text) return;
+// ─── Batch Processing ───────────────────────
+function parseSegment(seg) {
+  seg = seg.trim();
+  if (!seg) return null;
+  // Find the last number (optionally followed by 分)
+  var m = seg.match(/(\d+(?:\.\d+)?)\s*(?:分)?\s*$/);
+  if (!m) return null;
+  var score = parseFloat(m[1]);
+  var nameText = seg.substring(0, seg.lastIndexOf(m[1])).trim()
+    .replace(/[的得了考了是]$/, '').trim();
+  if (!nameText) return null;
+  return { nameText: nameText, score: score };
+}
 
-  const parsed = parseVoiceText(text);
-  if (!parsed.score) {
-    // Only name, no score yet - wait
-    document.getElementById('transcriptBox').innerHTML =
-      `已识别: <span class="name-part">${escapeHtml(parsed.nameText)}</span>，请说出成绩`;
+function splitIntoUtterances(text) {
+  // Split by Chinese/English punctuation — ，。、；,.;
+  var parts = text.split(/[，,。.、；;]\s*/);
+  var result = [];
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i].trim();
+    if (p) result.push(p);
+  }
+  return result;
+}
+
+function processBatch() {
+  var text = state.accumulatedText.trim();
+  if (!text) {
+    showToast('没有识别到语音内容', 'warning');
     return;
   }
 
-  // Find matches
-  const candidates = findBestMatches(parsed.nameText, state.students);
-
-  const result = {
-    transcript: text,
-    nameText: parsed.nameText,
-    score: parsed.score,
-    candidates: candidates,
-    applied: null,
-  };
-
-  state.lastResult = result;
-
-  if (candidates.length > 0 && candidates[0].score >= 90) {
-    // Auto-apply
-    const best = candidates[0];
-    result.applied = { name: best.name, idx: best.idx, method: methodLabel(best.method) };
-    applyScore(best.idx, parsed.score);
-    state.currentHighlight = best.idx;
-    document.getElementById('transcriptBox').innerHTML =
-      `已识别: <span class="name-part">${escapeHtml(parsed.nameText)}</span> → ${escapeHtml(best.name)} <span class="score-part">${parsed.score}</span> ✅`;
-    renderAll();
-  } else {
-    // Show candidates
-    state.recognizing = false;
-    if (state.recognition) {
-      try { state.recognition.stop(); } catch(e) {}
-    }
-    document.getElementById('micBtn').className = 'mic-btn';
-    document.getElementById('micStatus').textContent = '点击确认候选';
-    document.getElementById('transcriptBox').innerHTML =
-      `识别: <span class="name-part">${escapeHtml(parsed.nameText)}</span> <span class="score-part">${parsed.score}</span> — 请确认`;
-    renderMatchResult(result);
-    state.currentHighlight = candidates.length > 0 ? candidates[0].idx : null;
-    renderAll();
+  var segments = splitIntoUtterances(text);
+  if (segments.length === 0) {
+    showToast('无法解析语音内容', 'warning');
+    return;
   }
+
+  var batchResults = [];
+  for (var i = 0; i < segments.length; i++) {
+    var parsed = parseSegment(segments[i]);
+    if (!parsed) {
+      batchResults.push({
+        idx: i,
+        raw: segments[i],
+        nameText: segments[i],
+        score: null,
+        status: 'error',
+        match: null,
+        candidates: [],
+      });
+      continue;
+    }
+
+    var candidates = findBestMatches(parsed.nameText, state.students);
+    var best = candidates.length > 0 ? candidates[0] : null;
+    var status = 'ok';
+    var match = null;
+
+    if (best && best.score >= 90) {
+      match = { name: best.name, idx: best.idx, method: methodLabel(best.method) };
+      status = 'ok';
+    } else if (best && best.score >= 60) {
+      status = 'warn';
+    } else {
+      status = 'error';
+    }
+
+    batchResults.push({
+      idx: i,
+      raw: segments[i],
+      nameText: parsed.nameText,
+      score: parsed.score,
+      status: status,
+      match: match,
+      candidates: candidates.slice(0, 3),
+    });
+  }
+
+  state.batchResults = batchResults;
+  renderBatchResults(batchResults);
+  renderAll();
 }
 
 function methodLabel(m) {
-  const labels = {
+  var labels = {
     'exact': '精确匹配',
     'pinyin-exact': '拼音匹配',
     'pinyin-fuzzy': '拼音近似',
@@ -1051,17 +1160,162 @@ function methodLabel(m) {
   return labels[m] || m;
 }
 
+function renderBatchResults(results) {
+  var el = document.getElementById('matchResult');
+  if (!results || results.length === 0) { el.innerHTML = ''; return; }
+
+  var ok = results.filter(function(r) { return r.status === 'ok'; }).length;
+  var warn = results.filter(function(r) { return r.status === 'warn'; }).length;
+  var err = results.filter(function(r) { return r.status === 'error'; }).length;
+
+  var html = '<div class="batch-results">';
+  html += '<div class="batch-header">';
+  html += '<span>批量识别结果</span>';
+  html += '<span style="font-size:12px;font-weight:400">';
+  html += '✅ ' + ok + '  ⚠️ ' + warn + '  ❌ ' + err;
+  html += '</span></div>';
+
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    var badgeClass = r.status === 'ok' ? 'ok' : (r.status === 'warn' ? 'warn' : 'err');
+    var badgeIcon = r.status === 'ok' ? '✓' : (r.status === 'warn' ? '?' : '✗');
+
+    html += '<div class="batch-item" id="batchItem-' + i + '">';
+    html += '<div class="idx-badge ' + badgeClass + '">' + badgeIcon + '</div>';
+
+    if (r.status === 'ok' && r.match) {
+      // Auto-matched
+      html += '<div><div class="name-match">' + escapeHtml(r.match.name) + '</div>';
+      html += '<div class="spoken-text">' + escapeHtml(r.nameText) + ' → <span class="text-sm">' + r.match.method + '</span></div></div>';
+      html += '<div class="score-val ok">' + r.score + '</div>';
+    } else if (r.status === 'warn' && r.candidates.length > 0) {
+      // Needs confirmation
+      html += '<div><div class="spoken-text">"' + escapeHtml(r.nameText) + '" <span style="color:var(--gray-400)">→ 请选择</span></div></div>';
+      html += '<div class="cand-row">';
+      html += '<button onclick="applyBatchScore(' + i + ', ' + r.candidates[0].idx + ', ' + r.score + ')">' + escapeHtml(r.candidates[0].name) + ' <span class="text-sm">' + r.candidates[0].score + '%</span></button>';
+      if (r.candidates.length > 1) {
+        html += '<button onclick="applyBatchScore(' + i + ', ' + r.candidates[1].idx + ', ' + r.score + ')">' + escapeHtml(r.candidates[1].name) + ' <span class="text-sm">' + r.candidates[1].score + '%</span></button>';
+      }
+      if (r.candidates.length > 2) {
+        html += '<button onclick="applyBatchScore(' + i + ', ' + r.candidates[2].idx + ', ' + r.score + ')">' + escapeHtml(r.candidates[2].name) + ' <span class="text-sm">' + r.candidates[2].score + '%</span></button>';
+      }
+      html += '</div>';
+      html += '<div class="score-val warn">' + r.score + '</div>';
+    } else {
+      // Error - unrecognized
+      html += '<div><div class="spoken-text">❌ "' + escapeHtml(r.nameText || r.raw) + '" ' + (r.score !== null ? r.score : '') + '</div></div>';
+      html += '<div style="margin-left:auto">';
+      html += '<input type="text" id="batchManual-' + i + '" placeholder="输入名字" style="width:90px;padding:3px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">';
+      html += '<button onclick="applyBatchManual(' + i + ')" style="margin-left:4px;padding:3px 10px;border:1px solid var(--gray-300);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">确认</button>';
+      html += '</div>';
+    }
+
+    html += '</div>';
+  }
+
+  // Batch actions
+  if (warn > 0) {
+    html += '<div class="batch-actions">';
+    html += '<button class="btn-primary" onclick="confirmAllAuto()" style="padding:6px 16px;font-size:13px">✅ 确认全部 (' + ok + ')</button>';
+    html += '<button class="btn-secondary" onclick="clearBatchResults()" style="padding:6px 16px;font-size:13px">清空结果</button>';
+    html += '</div>';
+  } else {
+    html += '<div class="batch-actions">';
+    html += '<button class="btn-primary" onclick="confirmAllAuto()" style="padding:6px 16px;font-size:13px">✅ 全部确认</button>';
+    html += '<button class="btn-secondary" onclick="clearBatchResults()" style="padding:6px 16px;font-size:13px">清空结果</button>';
+    html += '</div>';
+  }
+
+  html += '</div>';
+  el.innerHTML = html;
+
+  // Hide transcript when showing results
+  document.getElementById('transcriptBox').classList.add('has-results');
+}
+
+// ─── Batch Actions ─────────────────────────
+function applyBatchScore(batchIdx, studentIdx, score) {
+  applyScore(studentIdx, score);
+  // Remove this item from batch results
+  state.batchResults[batchIdx].status = 'ok';
+  state.batchResults[batchIdx].match = { name: state.students[studentIdx].name, idx: studentIdx };
+  state.batchResults[batchIdx].candidates = [];
+  renderBatchResults(state.batchResults);
+}
+
+function applyBatchManual(batchIdx) {
+  var input = document.getElementById('batchManual-' + batchIdx);
+  if (!input) return;
+  var name = input.value.trim();
+  if (!name) { showToast('请输入名字', 'warning'); return; }
+
+  var item = state.batchResults[batchIdx];
+  var matches = findBestMatches(name, state.students);
+  if (matches.length > 0 && matches[0].score >= 85) {
+    applyScore(matches[0].idx, item.score);
+    item.status = 'ok';
+    item.match = { name: matches[0].name, idx: matches[0].idx };
+    item.candidates = [];
+    renderBatchResults(state.batchResults);
+    return;
+  }
+
+  var direct = state.students.find(function(s) { return s.name === name; });
+  if (direct) {
+    applyScore(direct.idx, item.score);
+    item.status = 'ok';
+    item.match = { name: direct.name, idx: direct.idx };
+    item.candidates = [];
+    renderBatchResults(state.batchResults);
+    return;
+  }
+
+  showToast('未找到学生 "' + name + '"', 'error');
+}
+
+function confirmAllAuto() {
+  var results = state.batchResults || [];
+  var confirmed = 0;
+  for (var i = 0; i < results.length; i++) {
+    var r = results[i];
+    if (r.status === 'ok' && r.match) {
+      // Already applied by applyBatchScore or similar
+      confirmed++;
+    }
+  }
+  clearBatchResults();
+  showToast('已确认 ' + confirmed + ' 条成绩', 'success');
+}
+
+function clearBatchResults() {
+  state.batchResults = [];
+  state.accumulatedText = '';
+  document.getElementById('matchResult').innerHTML = '';
+  document.getElementById('transcriptBox').classList.remove('has-results');
+  document.getElementById('transcriptBox').innerHTML = '<span class="text-sm" style="color:var(--gray-400)">识别结果将显示在这里...</span>';
+  renderAll();
+}
+
+// ─── Mic Control ───────────────────────────
 function startRecognition() {
   if (!state.recognition) {
     state.recognition = initRecognition();
     if (!state.recognition) return;
   }
+  // Clear previous state
+  state.accumulatedText = '';
+  state.batchResults = [];
+  document.getElementById('matchResult').innerHTML = '';
+  document.getElementById('transcriptBox').classList.remove('has-results');
+
   try { state.recognition.start(); } catch(e) { /* already running */ }
   state.recognizing = true;
-  document.getElementById('micBtn').className = 'mic-btn listening';
-  document.getElementById('micStatus').textContent = '🎤 聆听中... 说出学生姓名和成绩';
+  var btn = document.getElementById('micBtn');
+  btn.className = 'mic-btn listening';
+  btn.textContent = '⏹';
+  document.getElementById('micStatus').textContent = '🎤 聆听中... 念完后再次点击停止';
   document.getElementById('micStatus').className = 'mic-status listening';
-  document.getElementById('transcriptBox').innerHTML = '<span class="text-sm" style="color:var(--gray-400)">等待语音输入...</span>';
+  document.getElementById('transcriptBox').innerHTML = '<span class="text-sm" style="color:var(--gray-400)">开始朗读，用逗号分隔不同学生...</span>';
 }
 
 function stopRecognition() {
@@ -1069,26 +1323,21 @@ function stopRecognition() {
     try { state.recognition.stop(); } catch(e) {}
   }
   state.recognizing = false;
-  document.getElementById('micBtn').className = 'mic-btn';
-  document.getElementById('micStatus').textContent = '点击开始录入';
+  var btn = document.getElementById('micBtn');
+  btn.className = 'mic-btn';
+  btn.textContent = '🎤';
+  document.getElementById('micStatus').textContent = '处理中...';
   document.getElementById('micStatus').className = 'mic-status';
-  if (state.speechTimeout) { clearTimeout(state.speechTimeout); state.speechTimeout = null; }
+
+  // Process accumulated batch
+  processBatch();
 }
 
-// ─── Mic Button Toggle ─────────────────────
-document.getElementById('micBtn').addEventListener('click', () => {
-  // If we're showing candidates, clicking mic should instead handle that differently
-  const resultEl = document.getElementById('matchResult');
-  const hasCandidates = resultEl.querySelector('.match-candidates');
-
+// Mic button toggle: start → accumulate → stop → batch process
+document.getElementById('micBtn').addEventListener('click', function() {
   if (state.recognizing) {
     stopRecognition();
   } else {
-    // Clear previous match result if it's a candidate selection
-    if (!hasCandidates) {
-      document.getElementById('matchResult').innerHTML = '';
-      state.lastResult = null;
-    }
     startRecognition();
   }
 });
