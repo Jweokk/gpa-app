@@ -501,6 +501,7 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
 .batch-item .score-val { font-weight: 600; margin-left: auto; }
 .batch-item .score-val.ok { color: var(--success); }
 .batch-item .score-val.warn { color: var(--warning); }
+.batch-item .score-val.err { color: var(--error); }
 .batch-item .cand-row {
   display: flex;
   gap: 4px;
@@ -1186,12 +1187,24 @@ function renderBatchResults(results) {
       html += '</div>';
       html += '<div class="score-val warn">' + r.score + '</div>';
     } else {
-      // Error - unrecognized
-      html += '<div><div class="spoken-text">❌ "' + escapeHtml(r.nameText || r.raw) + '" ' + (r.score !== null ? r.score : '') + '</div></div>';
-      html += '<div style="margin-left:auto">';
-      html += '<input type="text" id="batchManual-' + i + '" placeholder="输入名字" style="width:90px;padding:3px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px">';
-      html += '<button onclick="applyBatchManual(' + i + ')" style="margin-left:4px;padding:3px 10px;border:1px solid var(--gray-300);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">确认</button>';
+      // Error - low/no match. Show top remaining students as candidates
+      var remaining = state.students.filter(function(s) { return s.score === null || s.score === undefined; });
+      // Sort by similarity to the spoken name
+      var sortedRemaining = remaining.map(function(s) {
+        var sim = Math.max(charSimilarity(r.nameText, s.name), pinyinSimilarity(r.nameText, s.name));
+        return { student: s, sim: Math.round(sim * 100) };
+      }).sort(function(a, b) { return b.sim - a.sim; });
+
+      html += '<div><div class="spoken-text">❌ "' + escapeHtml(r.nameText) + '" ' + r.score + ' <span style="color:var(--gray-400)">→ 选一个:</span></div></div>';
+      html += '<div class="cand-row">';
+      var maxShow = Math.min(5, sortedRemaining.length);
+      for (var ci = 0; ci < maxShow; ci++) {
+        var cand = sortedRemaining[ci];
+        html += '<button onclick="applyBatchScore(' + i + ', ' + cand.student.idx + ', ' + r.score + ')">' + escapeHtml(cand.student.name) + ' <span class="text-sm">' + cand.sim + '%</span></button>';
+      }
+      html += '<button onclick="skipBatchItem(' + i + ')" style="color:var(--gray-400);border-color:var(--gray-200)">跳过</button>';
       html += '</div>';
+      html += '<div class="score-val err">' + r.score + '</div>';
     }
 
     html += '</div>';
@@ -1278,19 +1291,26 @@ function clearBatchResults() {
   renderAll();
 }
 
+function skipBatchItem(batchIdx) {
+  state.batchResults[batchIdx].status = 'skipped';
+  renderBatchResults(state.batchResults);
+}
+
 // ─── Mic Control ───────────────────────────
 function startRecognition() {
-  if (!state.recognition) {
-    state.recognition = initRecognition();
-    if (!state.recognition) return;
+  // Always create fresh recognition instance (browser bug: reusing stopped instance may fail)
+  if (state.recognition) {
+    try { state.recognition.abort(); } catch(e) {}
   }
-  // Clear previous state
+  state.recognition = initRecognition();
+  if (!state.recognition) return;
+
   state.accumulatedText = '';
   state.batchResults = [];
   document.getElementById('matchResult').innerHTML = '';
   document.getElementById('transcriptBox').classList.remove('has-results');
 
-  try { state.recognition.start(); } catch(e) { /* already running */ }
+  try { state.recognition.start(); } catch(e) { console.error(e); }
   state.recognizing = true;
   var btn = document.getElementById('micBtn');
   btn.className = 'mic-btn listening';
