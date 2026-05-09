@@ -5,34 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GPA · 语音成绩登记</title>
 <script>
-// CDN fallback loader — tries multiple sources for China compatibility
+// CDN fallback loader — xlsx is required, pinyin-pro is optional (ESM dynamic import)
 (function() {
-  const scripts = [
-    { name: 'xlsx', urls: [
-      'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
-      'https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js',
-      'https://unpkg.com/xlsx@0.20.3/dist/xlsx.full.min.js',
-      'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.20.3/xlsx.full.min.js',
-    ]},
-    { name: 'pinyin-pro', urls: [
-      'https://cdn.jsdelivr.net/npm/pinyin-pro@3.24.0/dist/index.umd.min.js',
-      'https://unpkg.com/pinyin-pro@3.24.0/dist/index.umd.min.js',
-    ]}
+  // 1) Load xlsx via script tag (required)
+  var xlsxUrls = [
+    'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
+    'https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js',
+    'https://unpkg.com/xlsx@0.20.3/dist/xlsx.full.min.js',
+    'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.20.3/xlsx.full.min.js',
   ];
-  function loadNext(scriptInfo, idx, resolve, reject) {
-    if (idx >= scriptInfo.urls.length) {
-      reject(new Error(scriptInfo.name + ' 加载失败，请检查网络'));
-      return;
-    }
+  function loadScript(urls, idx, resolve) {
+    if (idx >= urls.length) { throw new Error('xlsx 加载失败，请刷新重试'); }
     var s = document.createElement('script');
-    s.src = scriptInfo.urls[idx];
+    s.src = urls[idx];
     s.onload = resolve;
-    s.onerror = function() { loadNext(scriptInfo, idx + 1, resolve, reject); };
+    s.onerror = function() { loadScript(urls, idx + 1, resolve); };
     document.head.appendChild(s);
   }
-  window._libsReady = Promise.all(scripts.map(function(si) {
-    return new Promise(function(resolve, reject) { loadNext(si, 0, resolve, reject); });
-  }));
+  var xlsxReady = new Promise(function(resolve) { loadScript(xlsxUrls, 0, resolve); });
+
+  // 2) Load pinyin-pro via ESM dynamic import (optional)
+  window._pinyinPro = null;
+  var pinyinReady = import(
+    'https://cdn.jsdelivr.net/npm/pinyin-pro@3.24.0/dist/index.mjs'
+  ).then(function(mod) {
+    window._pinyinPro = mod.default || mod;
+  }).catch(function() {
+    // Fallback: try unpkg
+    return import('https://unpkg.com/pinyin-pro@3.24.0/dist/index.mjs').then(function(mod) {
+      window._pinyinPro = mod.default || mod;
+    });
+  }).catch(function(err) {
+    console.warn('pinyin-pro 未加载，匹配将自动降级到文字近似模式');
+    window._pinyinPro = null;
+  });
+
+  window._libsReady = Promise.all([xlsxReady, pinyinReady]);
 })();
 </script>
 <style>
@@ -578,11 +586,14 @@ function levenshtein(a, b) {
 
 // ─── Pinyin Matching ────────────────────────
 function getPinyin(text) {
-  try {
-    return pinyinPro.pinyin(text, { toneType: 'none', type: 'array' });
-  } catch(e) {
-    return text.split('').map(c => c);
+  var pp = window._pinyinPro;
+  if (pp && pp.pinyin) {
+    try {
+      return pp.pinyin(text, { toneType: 'none', type: 'array' });
+    } catch(e) {}
   }
+  // Fallback: no pinyin library — return characters as-is
+  return text.split('').map(function(c) { return c; });
 }
 
 function pinyinSimilarity(a, b) {
@@ -1111,9 +1122,9 @@ function handleFile(file) {
   // Wait for libraries to load first
   Promise.resolve(window._libsReady || Promise.resolve())
     .then(function() {
-      if (typeof XLSX === 'undefined' || typeof pinyinPro === 'undefined') {
+      if (typeof XLSX === 'undefined') {
         showToast('依赖库加载失败，请刷新页面重试', 'error');
-        console.error('Lib check failed: XLSX=', typeof XLSX, 'pinyinPro=', typeof pinyinPro);
+        console.error('Lib check failed: XLSX=', typeof XLSX, 'pinyinPro=', typeof window._pinyinPro);
         return;
       }
       const reader = new FileReader();
