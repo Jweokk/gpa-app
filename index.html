@@ -546,6 +546,25 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   font-size: 12px;
   border: 1px solid var(--gray-200);
 }
+
+/* Mode tabs */
+.mode-tabs { display: flex; gap: 4px; }
+.mode-tab {
+  padding: 4px 12px;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--gray-500);
+  transition: all 0.15s;
+}
+.mode-tab:hover { border-color: var(--primary); color: var(--primary); }
+.mode-tab.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
 </style>
 </head>
 <body>
@@ -593,7 +612,10 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   <!-- Right: Voice Input -->
   <div class="panel">
     <div class="panel-header">
-      <span>🎤 语音录入</span>
+      <span class="mode-tabs">
+        <button class="mode-tab active" id="modeVoice" onclick="switchMode('voice')">📝 批量</button>
+        <button class="mode-tab" id="modeSeq" onclick="switchMode('sequential')">📋 顺序</button>
+      </span>
       <span class="text-sm" id="lastMatchName"></span>
     </div>
     <div class="panel-body">
@@ -601,7 +623,7 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
       <div class="mic-area">
         <button class="mic-btn" id="micBtn" title="点击开始/停止录音">🎤</button>
         <div class="mic-status" id="micStatus">点击开始录入</div>
-        <div class="voicetext-hint">朗读格式：<kbd>张三</kbd> 停顿一下 <kbd>85</kbd>，或连续 <kbd>张三 85</kbd></div>
+        <div class="voicetext-hint" id="modeHint">📝 批量模式：朗读 <kbd>张三 85，李四 92</kbd> 一次性读完</div>
       </div>
 
       <!-- Transcript -->
@@ -647,10 +669,12 @@ const state = {
   fileName: '',
   recognizing: false,
   recognition: null,
-  accumulatedText: '',  // Batch speech accumulation
-  batchResults: [],     // [{idx, raw, nameText, score, status, match, candidates}]
+  accumulatedText: '',
+  batchResults: [],
   lastResult: null,
   currentHighlight: null,
+  mode: 'voice',         // 'voice' (name+score) or 'sequential' (score only in order)
+  sequentialIndex: 0,    // current index in sequential mode
 };
 
 // ─── Levenshtein ────────────────────────────
@@ -696,12 +720,10 @@ function charSimilarity(a, b) {
 
 // ─── Name Matching ─────────────────────────
 function findBestMatches(spoken, students) {
-  const pending = students.filter(s => s.score === null || s.score === undefined);
-  if (pending.length === 0) return [];
+  var results = [];
 
-  const results = [];
-
-  for (const s of pending) {
+  for (var si = 0; si < students.length; si++) {
+    var s = students[si];
     // 1. Exact match
     if (spoken === s.name) {
       results.push({ ...s, score: 100, method: 'exact' });
@@ -851,11 +873,12 @@ function renderRoster() {
     if (isDone) done++;
     const rowClass = isDone ? 'done' : 'pending';
     const hlClass = highlight === s.idx ? ' current' : '';
-    html += `<tr class="${rowClass}${hlClass}">
+    const seqClass = state.mode === 'sequential' && state.sequentialIndex === s.idx ? ' current' : '';
+    html += `<tr class="${rowClass}${hlClass}${seqClass}" data-idx="${s.idx}">
       <td>${s.idx + 1}</td>
       <td>${s.name}</td>
-      <td class="score-cell ${isDone ? 'done' : ''}">${isDone ? s.score : '—'}</td>
-      <td class="status-icon">${isDone ? '✅' : '⏳'}</td>
+      <td class="score-cell ${isDone ? 'done' : ''}" onclick="editScore(${s.idx})" style="cursor:pointer">${isDone ? s.score : '—'}</td>
+      <td class="status-icon">${isDone ? '✅' : (state.mode === 'sequential' && state.sequentialIndex === s.idx ? '🎤' : '⏳')}</td>
     </tr>`;
   }
 
@@ -863,9 +886,32 @@ function renderRoster() {
   count.textContent = `${done}/${state.students.length}`;
 
   // Scroll to current highlight
-  if (highlight !== null) {
-    const rows = tbody.querySelectorAll('tr');
-    if (rows[highlight]) rows[highlight].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  const target = highlight !== null ? highlight : (state.mode === 'sequential' ? state.sequentialIndex : null);
+  if (target !== null) {
+    try {
+      const rows = tbody.querySelectorAll('tr');
+      if (rows[target]) rows[target].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch(e) {}
+  }
+}
+
+function editScore(idx) {
+  const s = state.students[idx];
+  if (!s) return;
+  const newScore = prompt('输入成绩 (' + s.name + '):', s.score !== null ? s.score : '');
+  if (newScore === null) return; // cancelled
+  const parsed = parseFloat(newScore);
+  if (!isNaN(parsed)) {
+    applyScore(idx, parsed);
+  } else if (newScore.trim() === '') {
+    // Clear score
+    state.history.push({ idx: idx, prevScore: s.score });
+    s.score = null;
+    s.matched = false;
+    state.currentHighlight = null;
+    renderAll();
+  } else {
+    showToast('请输入有效数字', 'warning');
   }
 }
 
@@ -1295,6 +1341,156 @@ function skipBatchItem(batchIdx) {
   state.batchResults[batchIdx].status = 'skipped';
   renderBatchResults(state.batchResults);
 }
+
+
+// ─── Mode Switching ─────────────────────────
+function switchMode(mode) {
+  if (state.recognizing) stopRecognition();
+  state.mode = mode;
+  state.batchResults = [];
+  state.accumulatedText = '';
+  document.getElementById('matchResult').innerHTML = '';
+
+  var vBtn = document.getElementById('modeVoice');
+  var sBtn = document.getElementById('modeSeq');
+  var hint = document.getElementById('modeHint');
+
+  if (mode === 'voice') {
+    vBtn.className = 'mode-tab active';
+    sBtn.className = 'mode-tab';
+    hint.innerHTML = '📝 批量模式：朗读 <kbd>张三 85，李四 92</kbd> 一次性读完';
+    document.getElementById('micStatus').textContent = '点击开始录入';
+    state.currentHighlight = null;
+  } else {
+    vBtn.className = 'mode-tab';
+    sBtn.className = 'mode-tab active';
+    // Find first ungraded student
+    var first = -1;
+    for (var i = 0; i < state.students.length; i++) {
+      if (state.students[i].score === null || state.students[i].score === undefined) {
+        first = i; break;
+      }
+    }
+    if (first === -1) {
+      hint.innerHTML = '📋 所有学生已录完 ✅';
+      return;
+    }
+    state.sequentialIndex = first;
+    state.currentHighlight = first;
+    hint.innerHTML = '📋 顺序模式：高亮的是当前学生，只说 <kbd>85</kbd> 自动跳到下一个';
+    // Auto-start
+    startRecognition();
+    renderAll();
+  }
+}
+
+function processSequential(text) {
+  text = text.trim();
+  if (!text) return;
+
+  var current = state.students[state.sequentialIndex];
+  if (!current) { showToast('已无待录入学生', 'warning'); stopRecognition(); return; }
+
+  // Skip commands
+  if (/跳过|下一个|过|不要|没|没有|空/.test(text)) {
+    showToast('已跳过 ' + current.name, 'warning');
+    advanceSequential();
+    return;
+  }
+
+  // Extract number
+  var m = text.match(/(\d+(?:\.\d+)?)/);
+  if (m) {
+    var score = parseFloat(m[1]);
+    applyScore(state.sequentialIndex, score);
+    showToast(current.name + ' = ' + score + ' ✅', 'success');
+    advanceSequential();
+  } else {
+    // No number found
+    document.getElementById('transcriptBox').innerHTML =
+      '未识别到数字: "' + escapeHtml(text) + '" - 请说成绩 或 "跳过"';
+  }
+}
+
+function advanceSequential() {
+  // Find next ungraded student
+  var next = -1;
+  for (var i = state.sequentialIndex + 1; i < state.students.length; i++) {
+    if (state.students[i].score === null || state.students[i].score === undefined) {
+      next = i; break;
+    }
+  }
+  if (next === -1) {
+    showToast('所有学生已录完 🎉', 'success');
+    state.currentHighlight = null;
+    stopRecognition();
+    renderAll();
+    return;
+  }
+  state.sequentialIndex = next;
+  state.currentHighlight = next;
+  document.getElementById('transcriptBox').innerHTML =
+    '当前: <span class="name-part">' + escapeHtml(state.students[next].name) + '</span> — 请说成绩';
+  renderAll();
+}
+
+// Override processBatch for voice mode, processSequential for sequential mode
+var origStopRecog = stopRecognition;
+stopRecognition = function() {
+  if (state.recognition) {
+    try { state.recognition.stop(); } catch(e) {}
+  }
+  state.recognizing = false;
+  var btn = document.getElementById('micBtn');
+  btn.className = 'mic-btn';
+  btn.textContent = '🎤';
+  document.getElementById('micStatus').textContent = '处理中...';
+  document.getElementById('micStatus').className = 'mic-status';
+
+  if (state.mode === 'voice') {
+    processBatch();
+  } else {
+    // Sequential: process whatever was accumulated
+    if (state.accumulatedText.trim()) {
+      processSequential(state.accumulatedText);
+    }
+    state.accumulatedText = '';
+  }
+};
+
+// Override startRecognition hint
+var origStartRecog = startRecognition;
+startRecognition = function() {
+  if (state.recognition) {
+    try { state.recognition.abort(); } catch(e) {}
+  }
+  state.recognition = initRecognition();
+  if (!state.recognition) return;
+
+  state.accumulatedText = '';
+  if (state.mode === 'voice') {
+    state.batchResults = [];
+    document.getElementById('matchResult').innerHTML = '';
+    document.getElementById('transcriptBox').classList.remove('has-results');
+  }
+
+  try { state.recognition.start(); } catch(e) { console.error(e); }
+  state.recognizing = true;
+  var btn = document.getElementById('micBtn');
+  btn.className = 'mic-btn listening';
+  btn.textContent = '⏹';
+
+  if (state.mode === 'voice') {
+    document.getElementById('micStatus').textContent = '🎤 聆听中... 念完后再次点击停止';
+    document.getElementById('transcriptBox').innerHTML = '<span class="text-sm" style="color:var(--gray-400)">开始朗读...</span>';
+  } else {
+    var name = state.students[state.sequentialIndex] ? state.students[state.sequentialIndex].name : '?';
+    document.getElementById('micStatus').textContent = '🎤 聆听中... 请说 ' + name + ' 的成绩';
+    document.getElementById('transcriptBox').innerHTML =
+      '当前: <span class="name-part">' + escapeHtml(name) + '</span> — 请说成绩';
+  }
+  document.getElementById('micStatus').className = 'mic-status listening';
+};
 
 // ─── Mic Control ───────────────────────────
 function startRecognition() {
