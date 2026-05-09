@@ -1,0 +1,1136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPA · 语音成绩登记</title>
+<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.24.0/dist/index.umd.min.js">
+</script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js">
+</script>
+<style>
+:root {
+  --primary: #4f46e5;
+  --primary-light: #818cf8;
+  --primary-bg: #eef2ff;
+  --success: #10b981;
+  --success-bg: #d1fae5;
+  --warning: #f59e0b;
+  --warning-bg: #fef3c7;
+  --error: #ef4444;
+  --error-bg: #fee2e2;
+  --gray-50: #f9fafb;
+  --gray-100: #f3f4f6;
+  --gray-200: #e5e7eb;
+  --gray-300: #d1d5db;
+  --gray-400: #9ca3af;
+  --gray-500: #6b7280;
+  --gray-700: #374151;
+  --gray-900: #111827;
+  --radius: 12px;
+  --radius-sm: 8px;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+  background: var(--gray-50);
+  color: var(--gray-900);
+  min-height: 100vh;
+  padding: 24px;
+}
+.container { max-width: 960px; margin: 0 auto; }
+
+/* Header */
+header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--gray-200);
+}
+header h1 {
+  font-size: 24px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); margin-left: 8px; }
+.progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  color: var(--gray-500);
+}
+.progress-track {
+  width: 160px;
+  height: 6px;
+  background: var(--gray-200);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+
+/* Upload Area */
+.upload-zone {
+  background: #fff;
+  border: 2px dashed var(--gray-300);
+  border-radius: var(--radius);
+  padding: 48px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 24px;
+}
+.upload-zone:hover, .upload-zone.dragover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+}
+.upload-zone .icon { font-size: 48px; margin-bottom: 12px; }
+.upload-zone p { color: var(--gray-500); font-size: 14px; margin-top: 8px; }
+.upload-zone.has-file {
+  border-style: solid;
+  border-color: var(--success);
+  background: var(--success-bg);
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.upload-zone.has-file .icon { font-size: 24px; margin-bottom: 0; }
+
+/* Main two-column layout */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+@media (max-width: 768px) {
+  .main-grid { grid-template-columns: 1fr; }
+}
+
+/* Voice Panel */
+.panel {
+  background: #fff;
+  border-radius: var(--radius);
+  border: 1px solid var(--gray-200);
+  overflow: hidden;
+}
+.panel-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--gray-200);
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.panel-body { padding: 20px; }
+
+.mic-area { text-align: center; padding: 24px 0; }
+.mic-btn {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  border: none;
+  font-size: 36px;
+  cursor: pointer;
+  transition: all 0.3s;
+  background: var(--gray-100);
+  color: var(--gray-500);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+.mic-btn:hover { background: var(--primary-bg); color: var(--primary); }
+.mic-btn.listening {
+  background: var(--error);
+  color: #fff;
+  animation: pulse 1.5s infinite;
+}
+.mic-btn.got-match {
+  background: var(--success);
+  color: #fff;
+}
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+  50% { box-shadow: 0 0 0 16px rgba(239,68,68,0); }
+}
+.mic-status { font-size: 13px; color: var(--gray-500); margin-top: 8px; }
+.mic-status.listening { color: var(--error); font-weight: 600; }
+
+/* Transcription display */
+.transcript-box {
+  background: var(--gray-50);
+  border: 1px solid var(--gray-200);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  min-height: 48px;
+  font-size: 15px;
+  line-height: 1.6;
+  margin-top: 16px;
+}
+.transcript-box .highlight { 
+  background: var(--warning-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.transcript-box .name-part { color: var(--primary); font-weight: 600; }
+.transcript-box .score-part { color: var(--success); font-weight: 600; }
+
+/* Match result */
+.match-result { margin-top: 16px; }
+.match-auto {
+  background: var(--success-bg);
+  border: 1px solid var(--success);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  animation: slideIn 0.3s ease;
+}
+.match-auto .name { font-weight: 600; font-size: 16px; }
+.match-auto .score { font-size: 20px; font-weight: 700; color: var(--success); }
+.match-auto .method { font-size: 12px; color: var(--gray-500); }
+
+.match-candidates {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+}
+.match-candidates .prompt { font-size: 13px; color: var(--gray-700); margin-bottom: 8px; }
+.candidate-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.candidate-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--gray-300);
+  border-radius: 20px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.candidate-btn:hover {
+  border-color: var(--primary);
+  background: var(--primary-bg);
+  color: var(--primary);
+}
+.candidate-btn .confidence { font-size: 11px; color: var(--gray-400); }
+
+.manual-input-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+.manual-input-row input {
+  flex: 1;
+  padding: 6px 12px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+}
+.manual-input-row input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-bg);
+}
+.manual-input-row button {
+  padding: 6px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+.manual-input-row button:hover { background: var(--primary-light); }
+
+/* Undo button */
+.undo-area { margin-top: 12px; text-align: center; }
+.undo-btn {
+  border: none;
+  background: none;
+  color: var(--gray-400);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.undo-btn:hover { color: var(--error); background: var(--error-bg); }
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Student table */
+.student-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+.student-table th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 2px solid var(--gray-200);
+  font-weight: 600;
+  color: var(--gray-500);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.student-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--gray-100);
+}
+.student-table tr.done td { background: var(--success-bg); }
+.student-table tr.done .status-icon { color: var(--success); }
+.student-table tr.pending .status-icon { color: var(--gray-300); }
+.student-table tr.current td { background: var(--primary-bg); }
+.student-table .status-icon { font-size: 16px; }
+.student-table .score-cell {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.student-table .score-cell.done { color: var(--success); }
+
+.table-wrapper {
+  max-height: 500px;
+  overflow-y: auto;
+}
+.table-wrapper::-webkit-scrollbar {
+  width: 6px;
+}
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--gray-300);
+  border-radius: 3px;
+}
+
+/* Empty state */
+.empty-state {
+  text-align: center;
+  padding: 48px 24px;
+  color: var(--gray-400);
+}
+.empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+.empty-state p { font-size: 14px; }
+
+/* Export */
+.export-area {
+  background: #fff;
+  border-radius: var(--radius);
+  border: 1px solid var(--gray-200);
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.export-area .info { font-size: 14px; color: var(--gray-500); }
+.export-area .info strong { color: var(--gray-900); }
+.btn-primary {
+  padding: 10px 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--primary);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn-primary:hover { background: var(--primary-light); }
+.btn-primary:disabled {
+  background: var(--gray-300);
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  padding: 8px 16px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--gray-700);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-secondary:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-bg);
+}
+
+.hidden { display: none !important; }
+.text-center { text-align: center; }
+.text-sm { font-size: 13px; color: var(--gray-400); }
+.gap-2 { gap: 8px; }
+.flex { display: flex; }
+.items-center { align-items: center; }
+.mt-4 { margin-top: 16px; }
+
+/* Toast */
+.toast-container {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  padding: 12px 20px;
+  border-radius: var(--radius-sm);
+  background: var(--gray-900);
+  color: #fff;
+  font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  animation: slideInRight 0.3s ease;
+  max-width: 360px;
+}
+.toast.success { background: var(--success); }
+.toast.warning { background: var(--warning); color: var(--gray-900); }
+.toast.error { background: var(--error); }
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(40px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Voicetext hint */
+.voicetext-hint {
+  font-size: 13px;
+  color: var(--gray-400);
+  margin-top: 8px;
+  text-align: center;
+}
+.voicetext-hint kbd {
+  background: var(--gray-100);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 12px;
+  border: 1px solid var(--gray-200);
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>📋 GPA <small>语音成绩登记</small></h1>
+  <div class="progress-bar">
+    <span id="progressText">0 / 0</span>
+    <div class="progress-track">
+      <div class="progress-fill" id="progressFill" style="width:0%"></div>
+    </div>
+  </div>
+</header>
+
+<!-- Upload Zone -->
+<div id="uploadZone" class="upload-zone">
+  <div class="icon">📁</div>
+  <div><strong>上传 Excel 文件</strong></div>
+  <p>拖拽或点击选择 .xlsx / .xls 文件<br>第一列应为学生姓名</p>
+  <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
+</div>
+
+<!-- Main Grid -->
+<div class="main-grid" id="mainApp" style="display:none">
+
+  <!-- Left: Student Roster -->
+  <div class="panel">
+    <div class="panel-header">
+      <span>📋 学生名单</span>
+      <span class="text-sm" id="rosterCount"></span>
+    </div>
+    <div class="panel-body" style="padding:0">
+      <div class="table-wrapper">
+        <table class="student-table" id="studentTable">
+          <thead>
+            <tr><th style="width:40px">#</th><th>姓名</th><th style="width:80px">成绩</th><th style="width:40px"></th></tr>
+          </thead>
+          <tbody id="studentBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: Voice Input -->
+  <div class="panel">
+    <div class="panel-header">
+      <span>🎤 语音录入</span>
+      <span class="text-sm" id="lastMatchName"></span>
+    </div>
+    <div class="panel-body">
+      <!-- Mic -->
+      <div class="mic-area">
+        <button class="mic-btn" id="micBtn" title="点击开始/停止录音">🎤</button>
+        <div class="mic-status" id="micStatus">点击开始录入</div>
+        <div class="voicetext-hint">朗读格式：<kbd>张三</kbd> 停顿一下 <kbd>85</kbd>，或连续 <kbd>张三 85</kbd></div>
+      </div>
+
+      <!-- Transcript -->
+      <div class="transcript-box" id="transcriptBox">
+        <span class="text-sm" style="color:var(--gray-400)">识别结果将显示在这里...</span>
+      </div>
+
+      <!-- Match Result -->
+      <div class="match-result" id="matchResult"></div>
+
+      <!-- Undo -->
+      <div class="undo-area">
+        <button class="undo-btn hidden" id="undoBtn">↩ 撤销上次录入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Export -->
+<div class="export-area" id="exportArea" style="display:none">
+  <div class="info">
+    已填写 <strong id="doneCount">0</strong> / <strong id="totalCount">0</strong> 人
+  </div>
+  <button class="btn-primary" id="downloadBtn">
+    📥 下载 Excel
+  </button>
+</div>
+
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+// ============================================
+// GPA - 语音成绩登记系统
+// ============================================
+
+// ─── State ──────────────────────────────────
+const state = {
+  students: [],        // [{idx, name, score: null|number, matched: false}]
+  history: [],         // [{idx, prevScore}] for undo
+  fileName: '',
+  recognizing: false,
+  recognition: null,
+  speechTimeout: null,
+  pendingTranscript: '',
+  lastResult: null,    // {transcript, nameText, score, candidate, candidates}
+  currentHighlight: null,
+};
+
+// ─── Levenshtein ────────────────────────────
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({length: m+1}, () => new Uint8Array(n+1));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i-1] === b[j-1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i-1][j]+1, dp[i][j-1]+1, dp[i-1][j-1]+cost);
+    }
+  }
+  return dp[m][n];
+}
+
+// ─── Pinyin Matching ────────────────────────
+function getPinyin(text) {
+  try {
+    return pinyinPro.pinyin(text, { toneType: 'none', type: 'array' });
+  } catch(e) {
+    return text.split('').map(c => c);
+  }
+}
+
+function pinyinSimilarity(a, b) {
+  const pa = getPinyin(a).join('');
+  const pb = getPinyin(b).join('');
+  const dist = levenshtein(pa, pb);
+  const maxLen = Math.max(pa.length, pb.length);
+  return maxLen > 0 ? 1 - dist / maxLen : 1;
+}
+
+function charSimilarity(a, b) {
+  const dist = levenshtein(a, b);
+  const maxLen = Math.max(a.length, b.length);
+  return maxLen > 0 ? 1 - dist / maxLen : 1;
+}
+
+// ─── Name Matching ─────────────────────────
+function findBestMatches(spoken, students) {
+  const pending = students.filter(s => s.score === null || s.score === undefined);
+  if (pending.length === 0) return [];
+
+  const results = [];
+
+  for (const s of pending) {
+    // 1. Exact match
+    if (spoken === s.name) {
+      results.push({ ...s, score: 100, method: 'exact' });
+      continue;
+    }
+
+    // 2. Pinyin exact
+    const spPinyin = getPinyin(spoken).join(' ');
+    const namePinyin = getPinyin(s.name).join(' ');
+    let sim = 0;
+    let method = '';
+
+    if (spPinyin === namePinyin) {
+      sim = 96;
+      method = 'pinyin-exact';
+    } else {
+      // 3. Pinyin fuzzy
+      const psim = pinyinSimilarity(spoken, s.name);
+      const csim = charSimilarity(spoken, s.name);
+      sim = Math.max(psim, csim) * 95;
+      method = psim >= csim ? 'pinyin-fuzzy' : 'char-fuzzy';
+    }
+
+    // Bonus: first character matches
+    if (spoken.length > 0 && s.name.length > 0 && spoken[0] === s.name[0]) {
+      sim = Math.min(100, sim + 5);
+    }
+
+    results.push({ ...s, score: Math.round(sim), method });
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return results.slice(0, 5);
+}
+
+// ─── Parse Voice Text ──────────────────────
+function parseVoiceText(text) {
+  // Extract last number (including decimals)
+  const numMatch = text.match(/(\d+(?:\.\d+)?)\s*$|(\d+(?:\.\d+)?)\s*分\s*$/);
+  if (!numMatch) return { nameText: text, score: null };
+
+  let score;
+  let nameText;
+  if (numMatch[1] !== undefined) {
+    score = parseFloat(numMatch[1]);
+    nameText = text.substring(0, text.lastIndexOf(numMatch[1])).trim();
+  } else if (numMatch[2] !== undefined) {
+    score = parseFloat(numMatch[2]);
+    const idx = text.lastIndexOf(numMatch[2]);
+    nameText = text.substring(0, idx).trim();
+  }
+
+  // Clean up common fillers
+  nameText = nameText.replace(/[，。、！？\s,\.\!\?\s]*$/g, '');
+
+  return { nameText, score };
+}
+
+// ─── Toast ──────────────────────────────────
+function showToast(msg, type = '') {
+  const container = document.getElementById('toastContainer');
+  const el = document.createElement('div');
+  el.className = 'toast ' + type;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; setTimeout(() => el.remove(), 300); }, 2500);
+}
+
+// ─── Excel IO ──────────────────────────────
+function parseExcel(data, fileName) {
+  const wb = XLSX.read(data, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  if (rows.length < 2) { showToast('Excel 至少需要表头+一行数据', 'error'); return; }
+
+  const headerRow = rows[0];
+  const nameColIdx = 0;
+  let scoreColIdx = -1;
+
+  // Find name column and score column
+  for (let i = 0; i < headerRow.length; i++) {
+    const h = String(headerRow[i] || '').trim();
+    if (/姓名|名字|学生|姓名|name|学生姓名/i.test(h)) { nameColIdx = i; }
+    if (/成绩|分数|得分|score/i.test(h)) { scoreColIdx = i; }
+  }
+
+  state.students = [];
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row || !row[nameColIdx]) continue;
+    const name = String(row[nameColIdx]).trim();
+    if (!name) continue;
+    const existingScore = (scoreColIdx >= 0 && row[scoreColIdx] !== undefined && row[scoreColIdx] !== '')
+      ? parseFloat(row[scoreColIdx]) : null;
+    state.students.push({
+      idx: state.students.length,
+      name,
+      score: (existingScore !== null && !isNaN(existingScore)) ? existingScore : null,
+      matched: existingScore !== null && !isNaN(existingScore),
+    });
+  }
+
+  state.fileName = fileName;
+  state.history = [];
+  state.lastResult = null;
+
+  showToast(`已加载 ${state.students.length} 名学生`, 'success');
+  renderAll();
+}
+
+// ─── Render ─────────────────────────────────
+function renderAll() {
+  renderRoster();
+  renderProgress();
+  renderExport();
+}
+
+function renderRoster() {
+  const tbody = document.getElementById('studentBody');
+  const count = document.getElementById('rosterCount');
+  let html = '';
+  let done = 0;
+  const highlight = state.currentHighlight;
+
+  for (const s of state.students) {
+    const isDone = s.score !== null && s.score !== undefined;
+    if (isDone) done++;
+    const rowClass = isDone ? 'done' : 'pending';
+    const hlClass = highlight === s.idx ? ' current' : '';
+    html += `<tr class="${rowClass}${hlClass}">
+      <td>${s.idx + 1}</td>
+      <td>${s.name}</td>
+      <td class="score-cell ${isDone ? 'done' : ''}">${isDone ? s.score : '—'}</td>
+      <td class="status-icon">${isDone ? '✅' : '⏳'}</td>
+    </tr>`;
+  }
+
+  tbody.innerHTML = html;
+  count.textContent = `${done}/${state.students.length}`;
+
+  // Scroll to current highlight
+  if (highlight !== null) {
+    const rows = tbody.querySelectorAll('tr');
+    if (rows[highlight]) rows[highlight].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function renderProgress() {
+  const done = state.students.filter(s => s.score !== null && s.score !== undefined).length;
+  const total = state.students.length;
+  document.getElementById('progressText').textContent = `${done} / ${total}`;
+  document.getElementById('progressFill').style.width = total > 0 ? `${(done/total)*100}%` : '0%';
+}
+
+function renderExport() {
+  const done = state.students.filter(s => s.score !== null && s.score !== undefined).length;
+  const total = state.students.length;
+  document.getElementById('doneCount').textContent = done;
+  document.getElementById('totalCount').textContent = total;
+  document.getElementById('downloadBtn').disabled = done === 0;
+  document.getElementById('exportArea').style.display = total > 0 ? 'flex' : 'none';
+
+  // Show undo
+  document.getElementById('undoBtn').classList.toggle('hidden', state.history.length === 0);
+}
+
+function renderMatchResult(result) {
+  const el = document.getElementById('matchResult');
+  if (!result) { el.innerHTML = ''; return; }
+
+  const { transcript, nameText, score, applied, candidates } = result;
+
+  if (applied) {
+    // Auto-matched
+    el.innerHTML = `
+      <div class="match-auto">
+        <div>
+          <div class="name">${applied.name}</div>
+          <div class="method">${applied.method}</div>
+        </div>
+        <div class="score">${score}</div>
+      </div>`;
+    document.getElementById('lastMatchName').textContent = `✅ ${applied.name} = ${score}`;
+  } else if (candidates && candidates.length > 0) {
+    // Show candidates
+    const total = candidates.length;
+    const maxShow = Math.min(3, total);
+    let btns = '';
+    for (let i = 0; i < maxShow; i++) {
+      const c = candidates[i];
+      btns += `<button class="candidate-btn" onclick="applyCandidate(${c.idx}, ${score})">
+        ${i+1}. ${c.name} <span class="confidence">${c.score}%</span>
+      </button>`;
+    }
+
+    let manualInput = '';
+    if (nameText) {
+      manualInput = `
+        <div class="manual-input-row">
+          <input type="text" id="manualNameInput" value="${nameText}" placeholder="手动输入名字">
+          <button onclick="applyManual(${score})">确认</button>
+        </div>`;
+    }
+
+    el.innerHTML = `
+      <div class="match-candidates">
+        <div class="prompt">⚠️ 识别: "<strong>${nameText}</strong>"  成绩: <strong>${score}</strong>，请选择:</div>
+        <div class="candidate-list">${btns}</div>
+        ${manualInput}
+      </div>`;
+    document.getElementById('lastMatchName').textContent = `⚠️ ${nameText}?`;
+  } else {
+    // No candidates
+    el.innerHTML = `
+      <div class="match-candidates">
+        <div class="prompt">❌ 未找到匹配 "${nameText}"</div>
+        <div class="manual-input-row">
+          <input type="text" id="manualNameInput" value="${nameText}" placeholder="手动输入名字">
+          <input type="number" id="manualScoreInput" value="${score || ''}" placeholder="成绩" style="width:80px">
+          <button onclick="applyManual(
+            parseFloat(document.getElementById('manualScoreInput').value) || ${score || 0}
+          )">确认</button>
+        </div>
+      </div>`;
+    document.getElementById('lastMatchName').textContent = `❌ 未匹配`;
+  }
+}
+
+// ─── Apply Match ───────────────────────────
+function applyScore(studentIdx, score) {
+  const s = state.students[studentIdx];
+  if (!s) return;
+  state.history.push({ idx: studentIdx, prevScore: s.score });
+  s.score = score;
+  s.matched = true;
+  state.currentHighlight = null;
+  state.lastResult = null;
+  renderAll();
+  document.getElementById('matchResult').innerHTML = '';
+  showToast(`${s.name} = ${score} ✅`, 'success');
+}
+
+function applyCandidate(idx, score) {
+  applyScore(idx, score);
+  // Resume listening
+  if (!state.recognizing) startRecognition();
+}
+
+function applyManual(score) {
+  const nameInput = document.getElementById('manualNameInput');
+  const name = nameInput ? nameInput.value.trim() : '';
+  if (!name) { showToast('请输入名字', 'warning'); return; }
+
+  // Try exact match first, then fuzzy
+  const matches = findBestMatches(name, state.students);
+  if (matches.length > 0 && matches[0].score >= 85) {
+    applyScore(matches[0].idx, score);
+    return;
+  }
+
+  // Direct name match within students
+  const direct = state.students.find(s => s.name === name);
+  if (direct) {
+    applyScore(direct.idx, score);
+    return;
+  }
+
+  // Couldn't find, prompt
+  showToast(`未找到学生 "${name}"`, 'error');
+}
+
+// Undo
+document.getElementById('undoBtn').addEventListener('click', () => {
+  if (state.history.length === 0) return;
+  const last = state.history.pop();
+  const s = state.students[last.idx];
+  s.score = last.prevScore;
+  s.matched = last.prevScore !== null;
+  renderAll();
+  showToast(`撤销 ${s.name}`, 'warning');
+});
+
+// ─── Speech Recognition ────────────────────
+function initRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    document.getElementById('micStatus').textContent = '❌ 浏览器不支持语音识别，请使用 Chrome';
+    document.getElementById('micBtn').disabled = true;
+    return null;
+  }
+  const r = new SR();
+  r.lang = 'zh-CN';
+  r.continuous = true;
+  r.interimResults = true;
+  r.maxAlternatives = 3;
+
+  let finalTranscript = '';
+  let lastProcessedIndex = 0;
+
+  r.onresult = (event) => {
+    let interim = '';
+    let final = '';
+
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      const result = event.results[i];
+      if (result.isFinal) {
+        final += result[0].transcript;
+      } else {
+        interim += result[0].transcript;
+      }
+    }
+
+    // Show live transcript
+    const box = document.getElementById('transcriptBox');
+    if (interim) {
+      box.innerHTML = `<span class="name-part">${escapeHtml(final)}</span> <span class="highlight">${escapeHtml(interim)}</span>`;
+    } else if (final) {
+      box.innerHTML = `<span class="name-part">${escapeHtml(final)}</span>`;
+    }
+
+    // Process on silence (debounce)
+    if (final) {
+      if (state.speechTimeout) clearTimeout(state.speechTimeout);
+      state.speechTimeout = setTimeout(() => {
+        processUtterance(final);
+        final = '';
+      }, 1200);
+    }
+  };
+
+  r.onerror = (event) => {
+    console.error('Speech error:', event.error);
+    if (event.error === 'no-speech') return;
+    showToast(`语音识别错误: ${event.error}`, 'error');
+    stopRecognition();
+  };
+
+  r.onend = () => {
+    if (state.recognizing) {
+      // Auto-restart if we're supposed to be listening
+      try { r.start(); } catch(e) {}
+    }
+  };
+
+  return r;
+}
+
+function escapeHtml(text) {
+  const el = document.createElement('span');
+  el.textContent = text;
+  return el.innerHTML;
+}
+
+function processUtterance(text) {
+  text = text.trim();
+  if (!text) return;
+
+  const parsed = parseVoiceText(text);
+  if (!parsed.score) {
+    // Only name, no score yet - wait
+    document.getElementById('transcriptBox').innerHTML =
+      `已识别: <span class="name-part">${escapeHtml(parsed.nameText)}</span>，请说出成绩`;
+    return;
+  }
+
+  // Find matches
+  const candidates = findBestMatches(parsed.nameText, state.students);
+
+  const result = {
+    transcript: text,
+    nameText: parsed.nameText,
+    score: parsed.score,
+    candidates: candidates,
+    applied: null,
+  };
+
+  state.lastResult = result;
+
+  if (candidates.length > 0 && candidates[0].score >= 90) {
+    // Auto-apply
+    const best = candidates[0];
+    result.applied = { name: best.name, idx: best.idx, method: methodLabel(best.method) };
+    applyScore(best.idx, parsed.score);
+    state.currentHighlight = best.idx;
+    document.getElementById('transcriptBox').innerHTML =
+      `已识别: <span class="name-part">${escapeHtml(parsed.nameText)}</span> → ${escapeHtml(best.name)} <span class="score-part">${parsed.score}</span> ✅`;
+    renderAll();
+  } else {
+    // Show candidates
+    state.recognizing = false;
+    if (state.recognition) {
+      try { state.recognition.stop(); } catch(e) {}
+    }
+    document.getElementById('micBtn').className = 'mic-btn';
+    document.getElementById('micStatus').textContent = '点击确认候选';
+    document.getElementById('transcriptBox').innerHTML =
+      `识别: <span class="name-part">${escapeHtml(parsed.nameText)}</span> <span class="score-part">${parsed.score}</span> — 请确认`;
+    renderMatchResult(result);
+    state.currentHighlight = candidates.length > 0 ? candidates[0].idx : null;
+    renderAll();
+  }
+}
+
+function methodLabel(m) {
+  const labels = {
+    'exact': '精确匹配',
+    'pinyin-exact': '拼音匹配',
+    'pinyin-fuzzy': '拼音近似',
+    'char-fuzzy': '文字近似',
+  };
+  return labels[m] || m;
+}
+
+function startRecognition() {
+  if (!state.recognition) {
+    state.recognition = initRecognition();
+    if (!state.recognition) return;
+  }
+  try { state.recognition.start(); } catch(e) { /* already running */ }
+  state.recognizing = true;
+  document.getElementById('micBtn').className = 'mic-btn listening';
+  document.getElementById('micStatus').textContent = '🎤 聆听中... 说出学生姓名和成绩';
+  document.getElementById('micStatus').className = 'mic-status listening';
+  document.getElementById('transcriptBox').innerHTML = '<span class="text-sm" style="color:var(--gray-400)">等待语音输入...</span>';
+}
+
+function stopRecognition() {
+  if (state.recognition) {
+    try { state.recognition.stop(); } catch(e) {}
+  }
+  state.recognizing = false;
+  document.getElementById('micBtn').className = 'mic-btn';
+  document.getElementById('micStatus').textContent = '点击开始录入';
+  document.getElementById('micStatus').className = 'mic-status';
+  if (state.speechTimeout) { clearTimeout(state.speechTimeout); state.speechTimeout = null; }
+}
+
+// ─── Mic Button Toggle ─────────────────────
+document.getElementById('micBtn').addEventListener('click', () => {
+  // If we're showing candidates, clicking mic should instead handle that differently
+  const resultEl = document.getElementById('matchResult');
+  const hasCandidates = resultEl.querySelector('.match-candidates');
+
+  if (state.recognizing) {
+    stopRecognition();
+  } else {
+    // Clear previous match result if it's a candidate selection
+    if (!hasCandidates) {
+      document.getElementById('matchResult').innerHTML = '';
+      state.lastResult = null;
+    }
+    startRecognition();
+  }
+});
+
+// ─── File Upload ───────────────────────────
+const uploadZone = document.getElementById('uploadZone');
+const fileInput = document.getElementById('fileInput');
+
+uploadZone.addEventListener('click', () => fileInput.click());
+
+uploadZone.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  uploadZone.classList.add('dragover');
+});
+uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('dragover'));
+uploadZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  uploadZone.classList.remove('dragover');
+  if (e.dataTransfer.files.length > 0) handleFile(e.dataTransfer.files[0]);
+});
+
+fileInput.addEventListener('change', (e) => {
+  if (e.target.files.length > 0) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  if (!file.name.match(/\.xlsx?$/i)) {
+    showToast('请上传 .xlsx 或 .xls 文件', 'error');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      parseExcel(new Uint8Array(e.target.result), file.name);
+      uploadZone.innerHTML = `
+        <div class="icon">📄</div>
+        <div><strong>${file.name}</strong> <span class="text-sm">(${file.size > 1024 ? Math.round(file.size/1024) + 'KB' : file.size + 'B'})</span></div>
+        <button class="btn-secondary" onclick="resetUpload()">更换文件</button>
+      `;
+      uploadZone.className = 'upload-zone has-file';
+      document.getElementById('mainApp').style.display = 'grid';
+    } catch(err) {
+      showToast('文件解析失败: ' + err.message, 'error');
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function resetUpload() {
+  state.students = [];
+  state.history = [];
+  state.lastResult = null;
+  if (state.recognizing) stopRecognition();
+  document.getElementById('mainApp').style.display = 'none';
+  document.getElementById('exportArea').style.display = 'none';
+  document.getElementById('matchResult').innerHTML = '';
+  document.getElementById('transcriptBox').innerHTML = '<span class="text-sm" style="color:var(--gray-400)">识别结果将显示在这里...</span>';
+  document.getElementById('lastMatchName').textContent = '';
+  uploadZone.innerHTML = `
+    <div class="icon">📁</div>
+    <div><strong>上传 Excel 文件</strong></div>
+    <p>拖拽或点击选择 .xlsx / .xls 文件<br>第一列应为学生姓名</p>
+  `;
+  uploadZone.className = 'upload-zone';
+}
+
+// ─── Download ──────────────────────────────
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  // Re-create workbook with scores
+  const data = state.students.map(s => ({
+    '姓名': s.name,
+    '成绩': s.score !== null ? s.score : '',
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '成绩');
+  const out = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  const outName = state.fileName.replace(/\.(xlsx?)$/i, '_已填.$1');
+  a.download = outName;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(`已下载 ${outName}`, 'success');
+});
+
+// Keyboard shortcut: Space to toggle mic
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space' && !e.repeat) {
+    e.preventDefault();
+    document.getElementById('micBtn').click();
+  }
+});
+
+// ─── Init ──────────────────────────────────
+console.log('GPA · 语音成绩登记系统 已加载');
+console.log('快捷键: Space 切换录音');
+</script>
+</body>
+</html>
