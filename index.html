@@ -4,9 +4,36 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>GPA · 语音成绩登记</title>
-<script src="https://cdn.jsdelivr.net/npm/pinyin-pro@3.24.0/dist/index.umd.min.js">
-</script>
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js">
+<script>
+// CDN fallback loader — tries multiple sources for China compatibility
+(function() {
+  const scripts = [
+    { name: 'xlsx', urls: [
+      'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
+      'https://cdn.jsdelivr.net/npm/xlsx@0.20.3/dist/xlsx.full.min.js',
+      'https://unpkg.com/xlsx@0.20.3/dist/xlsx.full.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.20.3/xlsx.full.min.js',
+    ]},
+    { name: 'pinyin-pro', urls: [
+      'https://cdn.jsdelivr.net/npm/pinyin-pro@3.24.0/dist/index.umd.min.js',
+      'https://unpkg.com/pinyin-pro@3.24.0/dist/index.umd.min.js',
+    ]}
+  ];
+  function loadNext(scriptInfo, idx, resolve, reject) {
+    if (idx >= scriptInfo.urls.length) {
+      reject(new Error(scriptInfo.name + ' 加载失败，请检查网络'));
+      return;
+    }
+    var s = document.createElement('script');
+    s.src = scriptInfo.urls[idx];
+    s.onload = resolve;
+    s.onerror = function() { loadNext(scriptInfo, idx + 1, resolve, reject); };
+    document.head.appendChild(s);
+  }
+  window._libsReady = Promise.all(scripts.map(function(si) {
+    return new Promise(function(resolve, reject) { loadNext(si, 0, resolve, reject); });
+  }));
+})();
 </script>
 <style>
 :root {
@@ -650,27 +677,42 @@ function showToast(msg, type = '') {
 
 // ─── Excel IO ──────────────────────────────
 function parseExcel(data, fileName) {
-  const wb = XLSX.read(data, { type: 'array' });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
-  if (rows.length < 2) { showToast('Excel 至少需要表头+一行数据', 'error'); return; }
+  let wb, ws, rows;
+  try {
+    wb = XLSX.read(data, { type: 'array' });
+    ws = wb.Sheets[wb.SheetNames[0]];
+    rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+  } catch(e) {
+    showToast('文件解析失败: 请确认文件为有效的 .xlsx 格式 (' + e.message + ')', 'error');
+    console.error('XLSX.parse error:', e);
+    return;
+  }
+  if (!rows || rows.length === 0) { showToast('Excel 文件为空', 'error'); return; }
 
   const headerRow = rows[0];
-  const nameColIdx = 0;
+  let nameColIdx = 0;
   let scoreColIdx = -1;
+  let hasHeader = false;
 
-  // Find name column and score column
-  for (let i = 0; i < headerRow.length; i++) {
-    const h = String(headerRow[i] || '').trim();
-    if (/姓名|名字|学生|姓名|name|学生姓名/i.test(h)) { nameColIdx = i; }
-    if (/成绩|分数|得分|score/i.test(h)) { scoreColIdx = i; }
+  // Guess if first row is a header or data
+  if (headerRow && headerRow.length > 0) {
+    for (let i = 0; i < headerRow.length; i++) {
+      const h = String(headerRow[i] || '').trim();
+      if (/姓名|名字|学生|name|score|成绩|分数|得分/i.test(h)) {
+        hasHeader = true;
+        if (/姓名|名字|学生|name/i.test(h) && !/score|成绩|分数|得分/i.test(h)) nameColIdx = i;
+        if (/score|成绩|分数|得分/i.test(h)) scoreColIdx = i;
+      }
+    }
   }
 
   state.students = [];
-  for (let r = 1; r < rows.length; r++) {
+  const startRow = hasHeader ? 1 : 0;
+
+  for (let r = startRow; r < rows.length; r++) {
     const row = rows[r];
-    if (!row || !row[nameColIdx]) continue;
-    const name = String(row[nameColIdx]).trim();
+    if (!row) continue;
+    const name = String(row[nameColIdx] || '').trim();
     if (!name) continue;
     const existingScore = (scoreColIdx >= 0 && row[scoreColIdx] !== undefined && row[scoreColIdx] !== '')
       ? parseFloat(row[scoreColIdx]) : null;
@@ -680,6 +722,11 @@ function parseExcel(data, fileName) {
       score: (existingScore !== null && !isNaN(existingScore)) ? existingScore : null,
       matched: existingScore !== null && !isNaN(existingScore),
     });
+  }
+
+  if (state.students.length === 0) {
+    showToast('未找到学生数据，请确认第一列是学生姓名', 'error');
+    return;
   }
 
   state.fileName = fileName;
@@ -1061,22 +1108,38 @@ function handleFile(file) {
     showToast('请上传 .xlsx 或 .xls 文件', 'error');
     return;
   }
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    try {
-      parseExcel(new Uint8Array(e.target.result), file.name);
-      uploadZone.innerHTML = `
-        <div class="icon">📄</div>
-        <div><strong>${file.name}</strong> <span class="text-sm">(${file.size > 1024 ? Math.round(file.size/1024) + 'KB' : file.size + 'B'})</span></div>
-        <button class="btn-secondary" onclick="resetUpload()">更换文件</button>
-      `;
-      uploadZone.className = 'upload-zone has-file';
-      document.getElementById('mainApp').style.display = 'grid';
-    } catch(err) {
-      showToast('文件解析失败: ' + err.message, 'error');
-    }
-  };
-  reader.readAsArrayBuffer(file);
+  // Wait for libraries to load first
+  Promise.resolve(window._libsReady || Promise.resolve())
+    .then(function() {
+      if (typeof XLSX === 'undefined' || typeof pinyinPro === 'undefined') {
+        showToast('依赖库加载失败，请刷新页面重试', 'error');
+        console.error('Lib check failed: XLSX=', typeof XLSX, 'pinyinPro=', typeof pinyinPro);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          parseExcel(new Uint8Array(e.target.result), file.name);
+          uploadZone.innerHTML = `
+            <div class="icon">📄</div>
+            <div><strong>${file.name}</strong> <span class="text-sm">(${file.size > 1024 ? Math.round(file.size/1024) + 'KB' : file.size + 'B'})</span></div>
+            <button class="btn-secondary" onclick="resetUpload()">更换文件</button>
+          `;
+          uploadZone.className = 'upload-zone has-file';
+          document.getElementById('mainApp').style.display = 'grid';
+        } catch(err) {
+          showToast('文件解析失败: ' + err.message, 'error');
+          console.error('handleFile error:', err);
+        }
+      };
+      reader.onerror = function() {
+        showToast('文件读取失败', 'error');
+      };
+      reader.readAsArrayBuffer(file);
+    })
+    .catch(function(err) {
+      showToast('依赖库加载失败: ' + err.message, 'error');
+    });
 }
 
 function resetUpload() {
