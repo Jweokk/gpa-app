@@ -1111,6 +1111,8 @@ function processBatch() {
     if (best && best.score >= 90) {
       match = { name: best.name, idx: best.idx, method: methodLabel(best.method) };
       status = 'ok';
+      // Auto-apply to student list immediately
+      applyScore(best.idx, parsed.score);
     } else if (best && best.score >= 60) {
       status = 'warn';
     } else {
@@ -1257,16 +1259,14 @@ function applyBatchManual(batchIdx) {
 
 function confirmAllAuto() {
   var results = state.batchResults || [];
-  var confirmed = 0;
-  for (var i = 0; i < results.length; i++) {
-    var r = results[i];
-    if (r.status === 'ok' && r.match) {
-      // Already applied by applyBatchScore or similar
-      confirmed++;
-    }
+  var ok = results.filter(function(r) { return r.status === 'ok'; }).length;
+  var warn = results.filter(function(r) { return r.status === 'warn'; }).length;
+  if (warn > 0) {
+    showToast('还有 ' + warn + ' 条待确认，请点选候选或输入名字', 'warning');
+    return;
   }
   clearBatchResults();
-  showToast('已确认 ' + confirmed + ' 条成绩', 'success');
+  showToast('已录入 ' + ok + ' 条成绩 ✅', 'success');
 }
 
 function clearBatchResults() {
