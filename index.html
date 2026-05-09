@@ -1067,28 +1067,23 @@ function escapeHtml(text) {
 }
 
 // ─── Batch Processing ───────────────────────
-function parseSegment(seg) {
-  seg = seg.trim();
-  if (!seg) return null;
-  // Find the last number (optionally followed by 分)
-  var m = seg.match(/(\d+(?:\.\d+)?)\s*(?:分)?\s*$/);
-  if (!m) return null;
-  var score = parseFloat(m[1]);
-  var nameText = seg.substring(0, seg.lastIndexOf(m[1])).trim()
-    .replace(/[的得了考了是]$/, '').trim();
-  if (!nameText) return null;
-  return { nameText: nameText, score: score };
-}
-
-function splitIntoUtterances(text) {
-  // Split by Chinese/English punctuation — ，。、；,.;
-  var parts = text.split(/[，,。.、；;]\s*/);
-  var result = [];
-  for (var i = 0; i < parts.length; i++) {
-    var p = parts[i].trim();
-    if (p) result.push(p);
+function extractPairs(text) {
+  // Match patterns like "张三 85", "李四92", "王五 78分" automatically
+  // Pattern: Chinese characters (name) + optional space/number suffix
+  var results = [];
+  // Clean up common fillers first
+  text = text.replace(/[，。、；：\s,.;:\u3000]+/g, ' ');
+  // Match: CJK name chars → digits (score)
+  var regex = /([\u4e00-\u9fff·\u767e\u5343]{1,6})\s*(\d+(?:\.\d+)?)/g;
+  var match;
+  while ((match = regex.exec(text)) !== null) {
+    var nameText = match[1].replace(/[的得了考了是]$/, '');
+    var score = parseFloat(match[2]);
+    if (nameText && !isNaN(score)) {
+      results.push({ nameText: nameText, score: score });
+    }
   }
-  return result;
+  return results;
 }
 
 function processBatch() {
@@ -1098,27 +1093,15 @@ function processBatch() {
     return;
   }
 
-  var segments = splitIntoUtterances(text);
-  if (segments.length === 0) {
-    showToast('无法解析语音内容', 'warning');
+  var pairs = extractPairs(text);
+  if (pairs.length === 0) {
+    showToast('未识别到有效的「姓名+成绩」组合。请说：张三 85，李四 92 之类的格式', 'warning');
     return;
   }
 
   var batchResults = [];
-  for (var i = 0; i < segments.length; i++) {
-    var parsed = parseSegment(segments[i]);
-    if (!parsed) {
-      batchResults.push({
-        idx: i,
-        raw: segments[i],
-        nameText: segments[i],
-        score: null,
-        status: 'error',
-        match: null,
-        candidates: [],
-      });
-      continue;
-    }
+  for (var i = 0; i < pairs.length; i++) {
+    var parsed = pairs[i];
 
     var candidates = findBestMatches(parsed.nameText, state.students);
     var best = candidates.length > 0 ? candidates[0] : null;
