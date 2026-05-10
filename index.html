@@ -663,7 +663,7 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   <p>拖拽或点击选择 .xlsx / .xls 文件<br>第一列应为学生姓名</p>
   <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
 </div>
-<p style="font-size:12px;color:var(--gray-500);margin-top:6px">Excel 格式：第一列为学生姓名（第1行为表头），可含成绩列。例：<br>姓名 │ 成绩<br>张三 │ 85<br>李四 │ 92</p>
+<p style="font-size:12px;color:var(--gray-500);margin-top:6px" id="uploadHelp">Excel 格式：第一列为学生姓名（第1行为表头）。<br>例：姓名 │ 张三 │ 李四</p>
 
 <!-- Main Grid -->
 <div class="main-grid" id="mainApp" style="display:none">
@@ -1948,6 +1948,8 @@ function handleFile(file) {
           `;
           uploadZone.className = 'upload-zone has-file';
           document.getElementById('mainApp').style.display = 'grid';
+          var helpEl = document.getElementById('uploadHelp');
+          if (helpEl) helpEl.style.display = 'none';
         } catch(err) {
           showToast('文件解析失败: ' + err.message, 'error');
           console.error('handleFile error:', err);
@@ -1979,6 +1981,8 @@ function resetUpload() {
     <p>拖拽或点击选择 .xlsx / .xls 文件<br>第一列应为学生姓名</p>
   `;
   uploadZone.className = 'upload-zone';
+  var helpEl = document.getElementById('uploadHelp');
+  if (helpEl) helpEl.style.display = '';
 }
 
 // ─── Download ──────────────────────────────
