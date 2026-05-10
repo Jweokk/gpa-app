@@ -1179,6 +1179,48 @@ function initRecognition() {
     // Accumulate final text
     if (final) {
       state.accumulatedText += final;
+
+      // Sequential mode: real-time number extraction
+      // Chrome Chinese ASR tends to merge digits, so extract numbers as they arrive
+      if (state.mode === 'sequential') {
+        var seqText = final.replace(/[零〇]/g,'0').replace(/[一二壹]/g,'1')
+          .replace(/[二贰]/g,'2').replace(/[三叁]/g,'3')
+          .replace(/[四肆]/g,'4').replace(/[五伍]/g,'5')
+          .replace(/[六陆]/g,'6').replace(/[七柒]/g,'7')
+          .replace(/[八捌]/g,'8').replace(/[九玖]/g,'9')
+          .replace(/[十拾]/g,'10');
+        var newNums = [];
+        var nr = /(\d+(?:\.\d+)?)/g;
+        var nm;
+        while ((nm = nr.exec(seqText)) !== null) {
+          newNums.push(parseFloat(nm[1]));
+        }
+        // Apply any new numbers that haven't been applied yet
+        var idx = state.sequentialIndex;
+        for (var ni = 0; ni < newNums.length; ni++) {
+          // Skip already-graded students
+          while (idx < state.students.length &&
+                 (state.students[idx].score !== null && state.students[idx].score !== undefined)) {
+            idx++;
+          }
+          if (idx >= state.students.length) break;
+          // Check if this student already got this number (avoid duplicate from interim→final)
+          if (state.students[idx].score === newNums[ni]) continue;
+          applyScore(idx, newNums[ni]);
+          idx++;
+        }
+        // Update sequentialIndex to next ungraded
+        while (idx < state.students.length &&
+               (state.students[idx].score !== null && state.students[idx].score !== undefined)) {
+          idx++;
+        }
+        state.sequentialIndex = idx;
+        state.currentHighlight = idx < state.students.length ? idx : null;
+        if (idx < state.students.length) {
+          document.getElementById('transcriptBox').innerHTML =
+            '已填至: <span class="name-part">' + escapeHtml(state.students[idx].name) + '</span>';
+        }
+      }
     }
 
     // Save full transcript (final + interim) for batch processing
