@@ -604,6 +604,29 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   border-color: var(--primary);
   color: #fff;
 }
+/* Selection toolbar */
+.sel-checkbox { margin-right: 6px; vertical-align: middle; cursor: pointer; }
+.student-table tr.selected { background: var(--primary-bg) !important; }
+.sel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--gray-200);
+  font-size: 13px;
+  background: #fff;
+}
+.sel-btn {
+  padding: 4px 10px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--gray-700);
+  transition: all 0.15s;
+}
+.sel-btn:hover { border-color: var(--error); color: var(--error); background: var(--error-bg); }
 </style>
 </head>
 <body>
@@ -644,6 +667,12 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
           </thead>
           <tbody id="studentBody"></tbody>
         </table>
+      </div>
+      <div class="sel-toolbar" id="selToolbar" style="display:none">
+        <button class="sel-btn" onclick="selectAllStudents()">☑ 全选</button>
+        <button class="sel-btn" onclick="deselectAllStudents()">☐ 取消选择</button>
+        <button class="sel-btn" onclick="clearSelectedScores()" style="color:var(--error)">🗑 清除选中</button>
+        <span style="margin-left:auto;color:var(--gray-500)">已选 <span id="selCount">0</span> 人</span>
       </div>
     </div>
   </div>
@@ -735,6 +764,7 @@ const state = {
   reviewPlaying: false,  // whether auto-play is active
   reviewPaused: false,   // whether paused
   reviewTimer: null,     // timeout ID for auto-advance
+  selectedStudents: new Set(), // indices selected for bulk clear
 };
 
 // ─── Levenshtein ────────────────────────────
@@ -934,9 +964,11 @@ function renderRoster() {
     const rowClass = isDone ? 'done' : 'pending';
     const hlClass = highlight === s.idx ? ' current' : '';
     const seqClass = state.mode === 'sequential' && state.sequentialIndex === s.idx ? ' current' : '';
-    html += `<tr class="${rowClass}${hlClass}${seqClass}" data-idx="${s.idx}">
+    const selClass = state.selectedStudents.has(s.idx) ? ' selected' : '';
+    const checked = state.selectedStudents.has(s.idx) ? 'checked' : '';
+    html += `<tr class="${rowClass}${hlClass}${seqClass}${selClass}" data-idx="${s.idx}">
       <td>${s.idx + 1}</td>
-      <td>${s.name}</td>
+      <td><input type="checkbox" class="sel-checkbox" data-idx="${s.idx}" onchange="toggleStudentSelection(${s.idx})" ${checked}>${s.name}</td>
       <td class="score-cell ${isDone ? 'done' : ''}" onclick="editScore(${s.idx})" style="cursor:pointer">${isDone ? s.score : '—'}</td>
       <td class="status-icon">${isDone ? '✅' : (state.mode === 'sequential' && state.sequentialIndex === s.idx ? '🎤' : '⏳')}</td>
     </tr>`;
@@ -944,6 +976,13 @@ function renderRoster() {
 
   tbody.innerHTML = html;
   count.textContent = `${done}/${state.students.length}`;
+
+  // Show selection toolbar when there are scored students
+  const toolbar = document.getElementById('selToolbar');
+  if (toolbar) {
+    toolbar.style.display = done > 0 ? 'flex' : 'none';
+  }
+  updateSelCount();
 
   // Scroll to current highlight
   const target = highlight !== null ? highlight : (state.mode === 'sequential' ? state.sequentialIndex : null);
@@ -1602,10 +1641,10 @@ function advanceSequential() {
 // Override processBatch for voice mode, processSequential for sequential mode
 var origStopRecog = stopRecognition;
 stopRecognition = function() {
+  state.recognizing = false;
   if (state.recognition) {
     try { state.recognition.stop(); } catch(e) {}
   }
-  state.recognizing = false;
   var btn = document.getElementById('micBtn');
   btn.className = 'mic-btn';
   btn.textContent = '🎤';
@@ -1689,10 +1728,10 @@ function startRecognition() {
 }
 
 function stopRecognition() {
+  state.recognizing = false;
   if (state.recognition) {
     try { state.recognition.stop(); } catch(e) {}
   }
-  state.recognizing = false;
   var btn = document.getElementById('micBtn');
   btn.className = 'mic-btn';
   btn.textContent = '🎤';
@@ -1861,7 +1900,7 @@ function speakCurrentStudent() {
     return;
   }
 
-  var text = s.name + '，成绩，' + s.score;
+  var text = s.name + '，' + s.score + '分';
   var utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = 'zh-CN';
   utterance.rate = 1.0;
@@ -1872,9 +1911,6 @@ function speakCurrentStudent() {
       var interval = parseFloat(document.getElementById('reviewInterval').value) * 1000;
       state.reviewTimer = setTimeout(function() {
         nextReview();
-        if (state.reviewPlaying && !state.reviewPaused && state.reviewIndex < state.students.length) {
-          speakCurrentStudent();
-        }
       }, interval);
     }
   };
@@ -1948,6 +1984,7 @@ function nextReview() {
   var nextPos = (currentPos + 1) % scored.length;
   state.reviewIndex = scored[nextPos];
   buildReviewList();
+  speakCurrentStudent();
 }
 
 function prevReview() {
@@ -1968,6 +2005,58 @@ function prevReview() {
   var prevPos = (currentPos - 1 + scored.length) % scored.length;
   state.reviewIndex = scored[prevPos];
   buildReviewList();
+  speakCurrentStudent();
+}
+
+// ─── Selection / Clear Scores ──────────────
+function toggleStudentSelection(idx) {
+  if (state.selectedStudents.has(idx)) {
+    state.selectedStudents.delete(idx);
+  } else {
+    state.selectedStudents.add(idx);
+  }
+  renderRoster();
+}
+
+function selectAllStudents() {
+  state.selectedStudents = new Set();
+  for (const s of state.students) {
+    if (s.score !== null && s.score !== undefined) {
+      state.selectedStudents.add(s.idx);
+    }
+  }
+  renderRoster();
+}
+
+function deselectAllStudents() {
+  state.selectedStudents = new Set();
+  renderRoster();
+}
+
+function clearSelectedScores() {
+  const indices = Array.from(state.selectedStudents);
+  if (indices.length === 0) {
+    showToast('没有选中的学生', 'warning');
+    return;
+  }
+  if (!confirm('确定清除选中的 ' + indices.length + ' 名学生的成绩吗？')) return;
+  for (const idx of indices) {
+    const s = state.students[idx];
+    if (s) {
+      state.history.push({ idx: idx, prevScore: s.score });
+      s.score = null;
+      s.matched = false;
+    }
+  }
+  state.selectedStudents = new Set();
+  renderAll();
+}
+
+function updateSelCount() {
+  const el = document.getElementById('selCount');
+  if (el) {
+    el.textContent = state.selectedStudents.size;
+  }
 }
 
 // Keyboard shortcut: Space to toggle mic
