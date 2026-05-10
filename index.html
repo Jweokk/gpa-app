@@ -570,6 +570,20 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
 .review-item.current { background: var(--primary-bg); }
 .review-item .r-name { font-weight: 600; }
 .review-item .r-score { color: var(--success); }
+
+/* ─── Guided Mode ─────────────────────────── */
+.guided-panel { margin-top:12px; }
+.guided-status { font-size:15px; font-weight:600; color:var(--primary); padding:8px 0; text-align:center; }
+.guided-step { margin:8px 0; }
+.guided-label { font-size:13px; color:var(--gray-500); margin-bottom:6px; }
+.guided-result { font-size:16px; font-weight:600; padding:6px 0; }
+.guided-cands { display:flex; flex-wrap:wrap; gap:6px; margin:6px 0; }
+.guided-cands button { padding:6px 14px; border:1px solid var(--gray-200); border-radius:var(--radius-sm); background:#fff; cursor:pointer; font-size:13px; }
+.guided-cands button:hover { border-color:var(--primary); color:var(--primary); }
+.guided-student { font-size:16px; font-weight:600; color:var(--primary); padding:4px 0; }
+.guided-score-area { display:flex; gap:6px; margin:8px 0; align-items:center; }
+.guided-timer { font-size:24px; font-weight:700; text-align:center; color:var(--primary); padding:8px 0; font-variant-numeric:tabular-nums; }
+.guided-interval-row { display:flex; justify-content:center; gap:8px; margin-top:12px; font-size:13px; color:var(--gray-500); }
 /* Clear transcript when showing results */
 .transcript-box.has-results { display: none; }
 .voicetext-hint {
@@ -685,6 +699,7 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
         <button class="mode-tab active" id="modeVoice" onclick="switchMode('voice')">📝 批量</button>
         <button class="mode-tab" id="modeSeq" onclick="switchMode('sequential')">📋 顺序</button>
         <button class="mode-tab" id="modeReview" onclick="switchMode('review')">🔊 核对</button>
+        <button class="mode-tab" id="modeGuided" onclick="switchMode('guided')">🎯 引导</button>
       </span>
       <span class="text-sm" id="lastMatchName"></span>
     </div>
@@ -725,6 +740,31 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
           </span>
         </div>
         <div class="review-list" id="reviewList"></div>
+      </div>
+
+      <!-- Guided Mode -->
+      <div class="guided-panel" id="guidedPanel" style="display:none">
+        <div class="guided-status" id="guidedStepDisplay">准备就绪</div>
+        <div class="guided-step" id="guidedStepName" style="display:none">
+          <div class="guided-label">步骤 1：说学生姓名</div>
+          <div class="guided-result" id="guidedNameResult"></div>
+          <div class="guided-cands" id="guidedNameCands"></div>
+          <button class="btn-primary" id="guidedStartBtn" onclick="startGuided()" style="width:100%;padding:10px;font-size:15px;margin-top:8px">🎤 开始</button>
+        </div>
+        <div class="guided-step" id="guidedStepScore" style="display:none">
+          <div class="guided-label">步骤 2：说成绩</div>
+          <div class="guided-student" id="guidedCurrentStudent"></div>
+          <div class="guided-score-area">
+            <input type="text" class="manual-input" id="guidedScoreInput" placeholder="或手动输入成绩" onkeydown="if(event.key==='Enter')confirmGuidedScore()" style="flex:1">
+            <button class="btn-primary" onclick="confirmGuidedScore()" style="padding:6px 14px">✅ 确认</button>
+            <button class="btn-secondary" onclick="retryGuidedScore()" style="padding:6px 10px">🔄 重说</button>
+          </div>
+          <div class="guided-timer" id="guidedTimerDisplay">⏱ 3s</div>
+        </div>
+        <div class="guided-interval-row">
+          <span>超时：<input type="range" id="guidedInterval" min="1" max="6" step="0.5" value="3" style="width:100px" oninput="document.getElementById('guidedIntervalLabel').textContent=this.value+'s'">
+          <span id="guidedIntervalLabel">3s</span></span>
+        </div>
       </div>
 
       <!-- Undo -->
@@ -773,6 +813,10 @@ const state = {
   reviewPaused: false,   // whether paused
   reviewTimer: null,     // timeout ID for auto-advance
   selectedStudents: new Set(), // indices selected for bulk clear
+  guidedStudentIdx: null,
+  guidedScoreValue: null,
+  guidedTimer: null,
+  guidedScoreStep: false,  // false=name step, true=score step
 };
 
 // ─── Levenshtein ────────────────────────────
@@ -1535,11 +1579,14 @@ function switchMode(mode) {
   var micStatus = document.getElementById('micStatus');
   var reviewPanel = document.getElementById('reviewPanel');
   var manualInputArea = document.getElementById('manualInputArea');
+  var gBtn = document.getElementById('modeGuided');
+  var guidedPanel = document.getElementById('guidedPanel');
 
   // Stop any ongoing review when leaving review mode
-  if (mode !== 'review') {
+  if (mode !== 'review' && mode !== 'guided') {
     stopReview();
     reviewPanel.style.display = 'none';
+    guidedPanel.style.display = 'none';
     micBtn.style.display = '';
     micStatus.style.display = '';
     hint.style.display = '';
@@ -1549,6 +1596,7 @@ function switchMode(mode) {
     vBtn.className = 'mode-tab active';
     sBtn.className = 'mode-tab';
     rBtn.className = 'mode-tab';
+    gBtn.className = 'mode-tab';
     hint.innerHTML = '📝 批量：一次性读「姓名+成绩」自动匹配录入。<br>例：<kbd>张三 85，李四 92</kbd><br>提示：浏览器需允许麦克风权限；说得清晰、语速均匀效果最佳';
     document.getElementById('micStatus').textContent = '点击开始录入';
     state.currentHighlight = null;
@@ -1557,6 +1605,7 @@ function switchMode(mode) {
     vBtn.className = 'mode-tab';
     sBtn.className = 'mode-tab active';
     rBtn.className = 'mode-tab';
+    gBtn.className = 'mode-tab';
     // Find first ungraded student
     var first = -1;
     for (var i = 0; i < state.students.length; i++) {
@@ -1580,6 +1629,7 @@ function switchMode(mode) {
     vBtn.className = 'mode-tab';
     sBtn.className = 'mode-tab';
     rBtn.className = 'mode-tab active';
+    gBtn.className = 'mode-tab';
     // Hide mic area, show review panel
     micBtn.style.display = 'none';
     micStatus.style.display = 'none';
@@ -1593,6 +1643,30 @@ function switchMode(mode) {
     document.getElementById('transcriptBox').innerHTML = '';
     document.getElementById('transcriptBox').classList.remove('has-results');
     buildReviewList();
+  } else if (mode === 'guided') {
+    vBtn.className = 'mode-tab';
+    sBtn.className = 'mode-tab';
+    rBtn.className = 'mode-tab';
+    gBtn.className = 'mode-tab active';
+    // Hide mic area, show guided panel
+    micBtn.style.display = 'none';
+    micStatus.style.display = 'none';
+    manualInputArea.style.display = 'none';
+    hint.innerHTML = '🎯 引导：按步骤依次说姓名→成绩，自动匹配并确认';
+    hint.style.display = '';
+    guidedPanel.style.display = '';
+    state.guidedStudentIdx = null;
+    state.guidedScoreValue = null;
+    state.guidedScoreStep = false;
+    state.currentHighlight = null;
+    document.getElementById('transcriptBox').innerHTML = '';
+    document.getElementById('transcriptBox').classList.remove('has-results');
+    document.getElementById('guidedStepDisplay').textContent = '准备就绪';
+    document.getElementById('guidedStepName').style.display = '';
+    document.getElementById('guidedStepScore').style.display = 'none';
+    document.getElementById('guidedStartBtn').style.display = '';
+    document.getElementById('guidedNameResult').innerHTML = '';
+    document.getElementById('guidedNameCands').innerHTML = '';
   }
 }
 
@@ -2177,6 +2251,236 @@ function pasteManualInput() {
   }).catch(function() {
     showToast('粘贴失败，请手动输入', 'warning');
   });
+}
+
+// ─── Guided Mode ──────────────────────────
+function startGuided() {
+  document.getElementById('guidedStartBtn').style.display = 'none';
+  state.guidedStudentIdx = null;
+  state.guidedScoreValue = null;
+  state.guidedScoreStep = false;
+  listenGuidedName();
+}
+
+function listenGuidedName() {
+  document.getElementById('guidedStepDisplay').textContent = '🎤 请说学生姓名';
+  document.getElementById('guidedStepName').style.display = '';
+  document.getElementById('guidedStepScore').style.display = 'none';
+  document.getElementById('guidedNameResult').innerHTML = '';
+  document.getElementById('guidedNameCands').innerHTML = '';
+  // Use a one-shot approach: start recognition, process first result
+  if (state.recognition) { try { state.recognition.abort(); } catch(e) {} }
+  state.recognition = initRecognition();
+  if (!state.recognition) return;
+  state.accumulatedText = '';
+  state.fullTranscript = '';
+  // Override onresult for name detection
+  state.recognition.onresult = function(event) {
+    var final = '';
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) final += event.results[i][0].transcript;
+    }
+    if (final) {
+      state.accumulatedText += final;
+    }
+    state.fullTranscript = state.accumulatedText;
+    var box = document.getElementById('transcriptBox');
+    box.innerHTML = '<span class="name-part">' + escapeHtml(state.accumulatedText) + '</span>';
+  };
+  // Override onend for processing
+  state.recognition.onend = function() {
+    if (state.mode !== 'guided') return;
+    if (state.recognizing) {
+      try { state.recognition.start(); } catch(e) {}
+      return;
+    }
+    processGuidedName(state.accumulatedText);
+    state.accumulatedText = '';
+  };
+  state.recognizing = true;
+  try { state.recognition.start(); } catch(e) {}
+  document.getElementById('micStatus').textContent = '🎤 聆听中... 说学生姓名';
+  document.getElementById('micStatus').className = 'mic-status listening';
+}
+
+function processGuidedName(text) {
+  text = text.trim();
+  if (!text) { listenGuidedName(); return; }
+  var candidates = findBestMatches(text, state.students);
+  if (!candidates || candidates.length === 0) {
+    document.getElementById('guidedNameResult').innerHTML = '❌ 未匹配到学生';
+    document.getElementById('guidedNameCands').innerHTML = '<button class="btn-secondary" onclick="listenGuidedName()">重试</button>';
+    return;
+  }
+  var best = candidates[0];
+  if (best.score >= 90) {
+    // Auto-match
+    state.guidedStudentIdx = best.idx;
+    document.getElementById('guidedNameResult').innerHTML = '✅ ' + escapeHtml(best.name) + ' (' + methodLabel(best.method) + ')';
+    document.getElementById('guidedStepDisplay').textContent = '已匹配: ' + best.name;
+    // Auto-continue to score after short delay
+    setTimeout(function() { listenGuidedScore(); }, 800);
+  } else if (best.score >= 60) {
+    // Show candidates
+    document.getElementById('guidedNameResult').innerHTML = '🤔 请选择:';
+    var candHtml = '';
+    for (var i = 0; i < Math.min(3, candidates.length); i++) {
+      candHtml += '<button onclick="selectGuidedName(' + candidates[i].idx + ')">' + escapeHtml(candidates[i].name) + ' (' + Math.round(candidates[i].score) + '%)</button>';
+    }
+    candHtml += '<button onclick="listenGuidedName()" style="color:var(--gray-400)">都不是</button>';
+    document.getElementById('guidedNameCands').innerHTML = candHtml;
+  } else {
+    // Low confidence
+    document.getElementById('guidedNameResult').innerHTML = '❌ 未找到准确匹配，请选择或重试:';
+    var candHtml = '';
+    var maxShow = Math.min(5, candidates.length);
+    for (var i = 0; i < maxShow; i++) {
+      candHtml += '<button onclick="selectGuidedName(' + candidates[i].idx + ')">' + escapeHtml(candidates[i].name) + '</button>';
+    }
+    candHtml += '<button onclick="listenGuidedName()" style="color:var(--gray-400)">🎤 重说</button>';
+    document.getElementById('guidedNameCands').innerHTML = candHtml;
+  }
+}
+
+function selectGuidedName(idx) {
+  state.guidedStudentIdx = idx;
+  var s = state.students[idx];
+  document.getElementById('guidedNameResult').innerHTML = '✅ ' + escapeHtml(s ? s.name : '');
+  document.getElementById('guidedNameCands').innerHTML = '';
+  setTimeout(function() { listenGuidedScore(); }, 500);
+}
+
+function listenGuidedScore() {
+  if (state.guidedStudentIdx === null) return;
+  var s = state.students[state.guidedStudentIdx];
+  if (!s) return;
+  document.getElementById('guidedStepDisplay').textContent = '🎤 请说 ' + s.name + ' 的成绩';
+  document.getElementById('guidedStepName').style.display = 'none';
+  document.getElementById('guidedStepScore').style.display = '';
+  document.getElementById('guidedCurrentStudent').textContent = '正在录入: ' + escapeHtml(s.name);
+  document.getElementById('guidedScoreInput').value = '';
+  document.getElementById('guidedTimerDisplay').textContent = '';
+  state.guidedScoreValue = null;
+  // Start recognition for score
+  if (state.recognition) { try { state.recognition.abort(); } catch(e) {} }
+  state.recognition = initRecognition();
+  if (!state.recognition) return;
+  state.accumulatedText = '';
+  state.fullTranscript = '';
+  state.recognition.onresult = function(event) {
+    var final = '';
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) final += event.results[i][0].transcript;
+    }
+    if (final) {
+      state.accumulatedText += final;
+    }
+    state.fullTranscript = state.accumulatedText;
+    var box = document.getElementById('transcriptBox');
+    box.innerHTML = '成绩: <span class="name-part">' + escapeHtml(state.accumulatedText) + '</span>';
+  };
+  state.recognition.onend = function() {
+    if (state.mode !== 'guided') return;
+    if (state.recognizing) {
+      try { state.recognition.start(); } catch(e) {}
+      return;
+    }
+    processGuidedScore(state.accumulatedText);
+    state.accumulatedText = '';
+  };
+  state.recognizing = true;
+  try { state.recognition.start(); } catch(e) {}
+  document.getElementById('micStatus').textContent = '🎤 聆听中... 说成绩';
+  document.getElementById('micStatus').className = 'mic-status listening';
+}
+
+function processGuidedScore(text) {
+  text = text.trim();
+  if (!text) return;
+  // Convert Chinese digits
+  text = text.replace(/[零〇]/g,'0').replace(/[一二壹]/g,'1').replace(/[二贰]/g,'2')
+    .replace(/[三叁]/g,'3').replace(/[四肆]/g,'4').replace(/[五伍]/g,'5')
+    .replace(/[六陆]/g,'6').replace(/[七柒]/g,'7').replace(/[八捌]/g,'8')
+    .replace(/[九玖]/g,'9').replace(/[十拾]/g,'10');
+  var m = text.match(/(\d+(?:\.\d+)?)/);
+  if (!m) { 
+    showToast('未识别到数字，请重说', 'warning');
+    return;
+  }
+  var score = parseFloat(m[1]);
+  state.guidedScoreValue = score;
+  document.getElementById('guidedTimerDisplay').textContent = '⏱ ' + score;
+  var timeout = parseFloat(document.getElementById('guidedInterval').value || 3) * 1000;
+  // Cancel previous timer
+  if (state.guidedTimer) clearTimeout(state.guidedTimer);
+  // Start countdown display
+  var remaining = Math.round(timeout / 1000);
+  document.getElementById('guidedStepDisplay').textContent = '✅ 成绩 ' + score + ' — 自动确认倒计时 ' + remaining + 's';
+  var countdownInterval = setInterval(function() {
+    remaining--;
+    if (remaining > 0) {
+      document.getElementById('guidedStepDisplay').textContent = '✅ 成绩 ' + score + ' — 自动确认倒计时 ' + remaining + 's';
+    } else {
+      clearInterval(countdownInterval);
+    }
+  }, 1000);
+  state.guidedTimer = setTimeout(function() {
+    clearInterval(countdownInterval);
+    confirmGuidedScore();
+  }, timeout);
+}
+
+function confirmGuidedScore() {
+  if (state.guidedTimer) { clearTimeout(state.guidedTimer); state.guidedTimer = null; }
+  if (state.guidedStudentIdx === null || state.guidedScoreValue === null) return;
+  // Check if manual input has a value
+  var manualVal = document.getElementById('guidedScoreInput').value.trim();
+  if (manualVal) {
+    var parsed = parseFloat(manualVal);
+    if (!isNaN(parsed)) state.guidedScoreValue = parsed;
+  }
+  applyScore(state.guidedStudentIdx, state.guidedScoreValue);
+  var s = state.students[state.guidedStudentIdx];
+  // TTS announcement
+  if (window.speechSynthesis && s) {
+    var utter = new SpeechSynthesisUtterance(s.name + '，' + state.guidedScoreValue + '分');
+    utter.lang = 'zh-CN';
+    utter.rate = 1.0;
+    window.speechSynthesis.speak(utter);
+  }
+  document.getElementById('guidedStepDisplay').textContent = '✅ 已录入 — ' + (s ? s.name : '') + ' = ' + state.guidedScoreValue;
+  // Auto-advance to next ungraded student after short delay
+  setTimeout(function() {
+    var next = -1;
+    for (var i = 0; i < state.students.length; i++) {
+      if (state.students[i].score === null || state.students[i].score === undefined) {
+        next = i; break;
+      }
+    }
+    if (next === -1) {
+      document.getElementById('guidedStepDisplay').textContent = '🎉 所有学生已录完';
+      document.getElementById('guidedStepName').style.display = 'none';
+      document.getElementById('guidedStepScore').style.display = 'none';
+      return;
+    }
+    // Reset for next student
+    state.guidedStudentIdx = null;
+    state.guidedScoreValue = null;
+    document.getElementById('guidedStepName').style.display = '';
+    document.getElementById('guidedStepScore').style.display = 'none';
+    document.getElementById('guidedNameResult').innerHTML = '';
+    document.getElementById('guidedNameCands').innerHTML = '';
+    document.getElementById('guidedTimerDisplay').textContent = '';
+    listenGuidedName();
+  }, 1500);
+}
+
+function retryGuidedScore() {
+  if (state.guidedTimer) { clearTimeout(state.guidedTimer); state.guidedTimer = null; }
+  state.guidedScoreValue = null;
+  document.getElementById('guidedScoreInput').value = '';
+  document.getElementById('guidedTimerDisplay').textContent = '';
+  listenGuidedScore();
 }
 
 // Keyboard shortcut: Space to toggle mic
