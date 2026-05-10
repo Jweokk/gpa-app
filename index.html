@@ -1533,6 +1533,9 @@ function switchMode(mode) {
     reviewPanel.style.display = '';
     state.reviewIndex = 0;
     state.currentHighlight = null;
+    // Clear transcript box so it doesn't show "当前:" from sequential mode
+    document.getElementById('transcriptBox').innerHTML = '';
+    document.getElementById('transcriptBox').classList.remove('has-results');
     buildReviewList();
   }
 }
@@ -1541,9 +1544,23 @@ function processSequential(text) {
   text = text.trim();
   if (!text) return;
 
+  // Convert Chinese number characters to digits
+  text = text.replace(/[零〇]/g, '0')
+    .replace(/[一二壹]/g, '1')
+    .replace(/[二贰]/g, '2')
+    .replace(/[三叁]/g, '3')
+    .replace(/[四肆]/g, '4')
+    .replace(/[五伍]/g, '5')
+    .replace(/[六陆]/g, '6')
+    .replace(/[七柒]/g, '7')
+    .replace(/[八捌]/g, '8')
+    .replace(/[九玖]/g, '9')
+    .replace(/[十拾]/g, '10');
+
   // Extract ALL numbers from the accumulated speech
   var numbers = [];
   var m;
+  // Match both Arabic digits and already-converted "10" from 十
   var numRegex = /(\d+(?:\.\d+)?)/g;
   while ((m = numRegex.exec(text)) !== null) {
     numbers.push(parseFloat(m[1]));
