@@ -1082,6 +1082,9 @@ function initRecognition() {
       state.accumulatedText += final;
     }
 
+    // Save full transcript (final + interim) for batch processing
+    state.fullTranscript = state.accumulatedText + interim;
+
     // Show live transcript
     const box = document.getElementById('transcriptBox');
     if (interim) {
@@ -1134,7 +1137,7 @@ function extractPairs(text) {
 }
 
 function processBatch() {
-  var text = state.accumulatedText.trim();
+  var text = (state.fullTranscript || state.accumulatedText || '').trim();
   if (!text) {
     showToast('没有识别到语音内容', 'warning');
     return;
@@ -1331,6 +1334,7 @@ function confirmAllAuto() {
 function clearBatchResults() {
   state.batchResults = [];
   state.accumulatedText = '';
+  state.fullTranscript = '';
   document.getElementById('matchResult').innerHTML = '';
   document.getElementById('transcriptBox').classList.remove('has-results');
   document.getElementById('transcriptBox').innerHTML = '<span class="text-sm" style="color:var(--gray-400)">识别结果将显示在这里...</span>';
@@ -1349,6 +1353,7 @@ function switchMode(mode) {
   state.mode = mode;
   state.batchResults = [];
   state.accumulatedText = '';
+  state.fullTranscript = '';
   document.getElementById('matchResult').innerHTML = '';
 
   var vBtn = document.getElementById('modeVoice');
@@ -1388,28 +1393,83 @@ function processSequential(text) {
   text = text.trim();
   if (!text) return;
 
-  var current = state.students[state.sequentialIndex];
-  if (!current) { showToast('已无待录入学生', 'warning'); stopRecognition(); return; }
+  // Extract ALL numbers from the accumulated speech
+  var numbers = [];
+  var m;
+  var numRegex = /(\d+(?:\.\d+)?)/g;
+  while ((m = numRegex.exec(text)) !== null) {
+    numbers.push(parseFloat(m[1]));
+  }
 
-  // Skip commands
-  if (/跳过|下一个|过|不要|没|没有|空/.test(text)) {
-    showToast('已跳过 ' + current.name, 'warning');
+  // Skip command: if only skip keywords and no numbers, skip current student
+  if (numbers.length === 0 && /跳过|下一个|过|不要|没|没有|空/.test(text)) {
+    // Find next ungraded student
+    var skipIdx = state.sequentialIndex;
+    while (skipIdx < state.students.length &&
+           (state.students[skipIdx].score !== null && state.students[skipIdx].score !== undefined)) {
+      skipIdx++;
+    }
+    if (skipIdx < state.students.length) {
+      showToast('已跳过 ' + state.students[skipIdx].name, 'warning');
+      state.students[skipIdx].score = -1; // mark as skipped
+      state.students[skipIdx].matched = true;
+    }
     advanceSequential();
     return;
   }
 
-  // Extract number
-  var m = text.match(/(\d+(?:\.\d+)?)/);
-  if (m) {
-    var score = parseFloat(m[1]);
-    applyScore(state.sequentialIndex, score);
-    showToast(current.name + ' = ' + score + ' ✅', 'success');
-    advanceSequential();
-  } else {
-    // No number found
+  if (numbers.length === 0) {
     document.getElementById('transcriptBox').innerHTML =
-      '未识别到数字: "' + escapeHtml(text) + '" - 请说成绩 或 "跳过"';
+      '未识别到数字: "' + escapeHtml(text) + '" - 请说成绩数字';
+    return;
   }
+
+  // Apply each number to consecutive ungraded students
+  var applied = 0;
+  var idx = state.sequentialIndex;
+  for (var n = 0; n < numbers.length; n++) {
+    // Find next ungraded student starting from current position
+    while (idx < state.students.length &&
+           (state.students[idx].score !== null && state.students[idx].score !== undefined)) {
+      idx++;
+    }
+    if (idx >= state.students.length) break;
+
+    applyScore(idx, numbers[n]);
+    showToast(state.students[idx].name + ' = ' + numbers[n] + ' ✅', 'success');
+    applied++;
+    idx++;
+  }
+
+  if (applied === 0) {
+    showToast('所有学生已录完', 'warning');
+    state.currentHighlight = null;
+    renderAll();
+    return;
+  }
+
+  // Move to next ungraded student after the last one we filled
+  state.sequentialIndex = idx;
+  // Find first still-ungraded for highlighting
+  while (state.sequentialIndex < state.students.length &&
+         (state.students[state.sequentialIndex].score !== null &&
+          state.students[state.sequentialIndex].score !== undefined)) {
+    state.sequentialIndex++;
+  }
+
+  if (state.sequentialIndex >= state.students.length) {
+    showToast('所有学生已录完 🎉', 'success');
+    state.currentHighlight = null;
+    renderAll();
+    return;
+  }
+
+  state.currentHighlight = state.sequentialIndex;
+  document.getElementById('transcriptBox').innerHTML =
+    '已填入 ' + applied + ' 人，当前: <span class="name-part">' +
+    escapeHtml(state.students[state.sequentialIndex].name) +
+    '</span> — 请说成绩';
+  renderAll();
 }
 
 function advanceSequential() {
@@ -1455,6 +1515,7 @@ stopRecognition = function() {
       processSequential(state.accumulatedText);
     }
     state.accumulatedText = '';
+    state.fullTranscript = '';
   }
 };
 
@@ -1468,6 +1529,7 @@ startRecognition = function() {
   if (!state.recognition) return;
 
   state.accumulatedText = '';
+  state.fullTranscript = '';
   if (state.mode === 'voice') {
     state.batchResults = [];
     document.getElementById('matchResult').innerHTML = '';
@@ -1502,6 +1564,7 @@ function startRecognition() {
   if (!state.recognition) return;
 
   state.accumulatedText = '';
+  state.fullTranscript = '';
   state.batchResults = [];
   document.getElementById('matchResult').innerHTML = '';
   document.getElementById('transcriptBox').classList.remove('has-results');
