@@ -1518,7 +1518,7 @@ function switchMode(mode) {
     }
     state.sequentialIndex = first;
     state.currentHighlight = first;
-    hint.innerHTML = '📋 顺序模式：高亮的是当前学生，只说 <kbd>85</kbd> 自动跳到下一个';
+    hint.innerHTML = '📋 顺序模式：点击左侧选择起始学生，每个数字后停顿一下 <kbd>85</kbd> 自动填到后续学生';
     // Auto-start
     startRecognition();
     renderAll();
@@ -2065,6 +2065,12 @@ function onRosterClick(event, idx) {
   if (state.mode === 'sequential') {
     state.sequentialIndex = idx;
     state.currentHighlight = idx;
+    // Sync right panel: show current student in transcript box
+    var s = state.students[idx];
+    if (s) {
+      document.getElementById('transcriptBox').innerHTML =
+        '当前: <span class="name-part">' + escapeHtml(s.name) + '</span> — 请说成绩';
+    }
     renderAll();
   }
 }
