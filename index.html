@@ -2268,8 +2268,11 @@ function listenGuidedName() {
   document.getElementById('guidedStepScore').style.display = 'none';
   document.getElementById('guidedNameResult').innerHTML = '';
   document.getElementById('guidedNameCands').innerHTML = '';
-  // Use a one-shot approach: start recognition, process first result
-  if (state.recognition) { try { state.recognition.abort(); } catch(e) {} }
+  // Stop any previous recognition
+  if (state.recognizing) {
+    try { state.recognition.stop(); } catch(e) {}
+    state.recognizing = false;
+  }
   state.recognition = initRecognition();
   if (!state.recognition) return;
   state.accumulatedText = '';
@@ -2290,15 +2293,16 @@ function listenGuidedName() {
   // Override onend for processing
   state.recognition.onend = function() {
     if (state.mode !== 'guided') return;
-    if (state.recognizing) {
+    // If we have text, process it. Otherwise keep listening.
+    if (state.accumulatedText.trim()) {
+      processGuidedName(state.accumulatedText);
+      state.accumulatedText = '';
+    } else {
       try { state.recognition.start(); } catch(e) {}
-      return;
     }
-    processGuidedName(state.accumulatedText);
-    state.accumulatedText = '';
   };
   state.recognizing = true;
-  try { state.recognition.start(); } catch(e) {}
+  try { state.recognition.start(); } catch(e) { console.error(e); }
   document.getElementById('micStatus').textContent = '🎤 聆听中... 说学生姓名';
   document.getElementById('micStatus').className = 'mic-status listening';
 }
@@ -2361,8 +2365,11 @@ function listenGuidedScore() {
   document.getElementById('guidedScoreInput').value = '';
   document.getElementById('guidedTimerDisplay').textContent = '';
   state.guidedScoreValue = null;
-  // Start recognition for score
-  if (state.recognition) { try { state.recognition.abort(); } catch(e) {} }
+  // Stop any previous recognition
+  if (state.recognizing) {
+    try { state.recognition.stop(); } catch(e) {}
+    state.recognizing = false;
+  }
   state.recognition = initRecognition();
   if (!state.recognition) return;
   state.accumulatedText = '';
@@ -2381,12 +2388,12 @@ function listenGuidedScore() {
   };
   state.recognition.onend = function() {
     if (state.mode !== 'guided') return;
-    if (state.recognizing) {
+    if (state.accumulatedText.trim()) {
+      processGuidedScore(state.accumulatedText);
+      state.accumulatedText = '';
+    } else {
       try { state.recognition.start(); } catch(e) {}
-      return;
     }
-    processGuidedScore(state.accumulatedText);
-    state.accumulatedText = '';
   };
   state.recognizing = true;
   try { state.recognition.start(); } catch(e) {}
