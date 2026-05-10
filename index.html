@@ -531,6 +531,45 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   bottom: 0;
   background: #fff;
 }
+
+/* ─── Review / Verification ──────────────── */
+.review-panel { margin-top: 12px; }
+.review-controls {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.review-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  background: #fff;
+  color: var(--gray-700);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.review-btn:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-bg); }
+.review-interval {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.review-list { max-height: 400px; overflow-y: auto; }
+.review-item {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--gray-100);
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  transition: background 0.15s;
+}
+.review-item.current { background: var(--primary-bg); }
+.review-item .r-name { font-weight: 600; }
+.review-item .r-score { color: var(--success); }
 /* Clear transcript when showing results */
 .transcript-box.has-results { display: none; }
 .voicetext-hint {
@@ -615,6 +654,7 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
       <span class="mode-tabs">
         <button class="mode-tab active" id="modeVoice" onclick="switchMode('voice')">📝 批量</button>
         <button class="mode-tab" id="modeSeq" onclick="switchMode('sequential')">📋 顺序</button>
+        <button class="mode-tab" id="modeReview" onclick="switchMode('review')">🔊 核对</button>
       </span>
       <span class="text-sm" id="lastMatchName"></span>
     </div>
@@ -633,6 +673,22 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
 
       <!-- Match Result -->
       <div class="match-result" id="matchResult"></div>
+
+      <!-- Review Panel -->
+      <div class="review-panel" id="reviewPanel" style="display:none">
+        <div class="review-controls">
+          <button class="review-btn btn-primary" id="reviewPlayBtn" onclick="toggleReviewPlay()" style="background:var(--primary);color:#fff;border:none;padding:6px 14px;border-radius:var(--radius-sm);font-size:13px;cursor:pointer">▶ 朗读</button>
+          <button class="review-btn" id="reviewPauseBtn" onclick="toggleReviewPlay()" style="display:none">⏸ 暂停</button>
+          <button class="review-btn" onclick="stopReview()">⏹ 停止</button>
+          <button class="review-btn" onclick="prevReview()">◀ 前一个</button>
+          <button class="review-btn" onclick="nextReview()">后一个 ▶</button>
+          <span class="review-interval">
+            间隔 <input type="range" id="reviewInterval" min="0.5" max="3" step="0.5" value="1.5" style="width:80px" oninput="document.getElementById('reviewIntervalLabel').textContent=this.value+'s'">
+            <span id="reviewIntervalLabel">1.5s</span>
+          </span>
+        </div>
+        <div class="review-list" id="reviewList"></div>
+      </div>
 
       <!-- Undo -->
       <div class="undo-area">
@@ -675,6 +731,10 @@ const state = {
   currentHighlight: null,
   mode: 'voice',         // 'voice' (name+score) or 'sequential' (score only in order)
   sequentialIndex: 0,    // current index in sequential mode
+  reviewIndex: 0,        // current review position
+  reviewPlaying: false,  // whether auto-play is active
+  reviewPaused: false,   // whether paused
+  reviewTimer: null,     // timeout ID for auto-advance
 };
 
 // ─── Levenshtein ────────────────────────────
@@ -1376,17 +1436,32 @@ function switchMode(mode) {
 
   var vBtn = document.getElementById('modeVoice');
   var sBtn = document.getElementById('modeSeq');
+  var rBtn = document.getElementById('modeReview');
   var hint = document.getElementById('modeHint');
+  var micBtn = document.getElementById('micBtn');
+  var micStatus = document.getElementById('micStatus');
+  var reviewPanel = document.getElementById('reviewPanel');
+
+  // Stop any ongoing review when leaving review mode
+  if (mode !== 'review') {
+    stopReview();
+    reviewPanel.style.display = 'none';
+    micBtn.style.display = '';
+    micStatus.style.display = '';
+    hint.style.display = '';
+  }
 
   if (mode === 'voice') {
     vBtn.className = 'mode-tab active';
     sBtn.className = 'mode-tab';
+    rBtn.className = 'mode-tab';
     hint.innerHTML = '📝 批量模式：朗读 <kbd>张三 85，李四 92</kbd> 一次性读完';
     document.getElementById('micStatus').textContent = '点击开始录入';
     state.currentHighlight = null;
-  } else {
+  } else if (mode === 'sequential') {
     vBtn.className = 'mode-tab';
     sBtn.className = 'mode-tab active';
+    rBtn.className = 'mode-tab';
     // Find first ungraded student
     var first = -1;
     for (var i = 0; i < state.students.length; i++) {
@@ -1404,6 +1479,18 @@ function switchMode(mode) {
     // Auto-start
     startRecognition();
     renderAll();
+  } else if (mode === 'review') {
+    vBtn.className = 'mode-tab';
+    sBtn.className = 'mode-tab';
+    rBtn.className = 'mode-tab active';
+    // Hide mic area, show review panel
+    micBtn.style.display = 'none';
+    micStatus.style.display = 'none';
+    hint.style.display = 'none';
+    reviewPanel.style.display = '';
+    state.reviewIndex = 0;
+    state.currentHighlight = null;
+    buildReviewList();
   }
 }
 
@@ -1724,6 +1811,164 @@ document.getElementById('downloadBtn').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
   showToast(`已下载 ${outName}`, 'success');
 });
+
+// ─── Review / Verification Functions ──────
+function buildReviewList() {
+  var list = document.getElementById('reviewList');
+  var students = state.students;
+  var html = '';
+  for (var i = 0; i < students.length; i++) {
+    var s = students[i];
+    var hasScore = (s.score !== null && s.score !== undefined && s.score !== -1);
+    var scoreText = hasScore ? s.score : '未录入';
+    var currentClass = (i === state.reviewIndex) ? ' current' : '';
+    var scoreClass = hasScore ? 'r-score' : '';
+    html += '<div class="review-item' + currentClass + '" data-idx="' + i + '">';
+    html += '<span class="r-name">' + escapeHtml(s.name) + '</span>';
+    html += '<span class="' + scoreClass + '">' + escapeHtml(String(scoreText)) + '</span>';
+    html += '</div>';
+  }
+  list.innerHTML = html;
+  // Scroll current into view
+  var currentEl = list.querySelector('.review-item.current');
+  if (currentEl) {
+    currentEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function getScoredStudents() {
+  var result = [];
+  for (var i = 0; i < state.students.length; i++) {
+    var s = state.students[i];
+    if (s.score !== null && s.score !== undefined && s.score !== -1) {
+      result.push(i);
+    }
+  }
+  return result;
+}
+
+function speakCurrentStudent() {
+  if (state.reviewPaused) return;
+  var students = state.students;
+  if (state.reviewIndex >= students.length) {
+    stopReview();
+    return;
+  }
+  var s = students[state.reviewIndex];
+  if (s.score === null || s.score === undefined || s.score === -1) {
+    // No score, skip to next
+    nextReview();
+    return;
+  }
+
+  var text = s.name + '，成绩，' + s.score;
+  var utterance = new SpeechSynthesisUtterance(text);
+  utterance.lang = 'zh-CN';
+  utterance.rate = 1.0;
+
+  var self = this;
+  utterance.onend = function() {
+    if (state.reviewPlaying && !state.reviewPaused) {
+      var interval = parseFloat(document.getElementById('reviewInterval').value) * 1000;
+      state.reviewTimer = setTimeout(function() {
+        nextReview();
+        if (state.reviewPlaying && !state.reviewPaused && state.reviewIndex < state.students.length) {
+          speakCurrentStudent();
+        }
+      }, interval);
+    }
+  };
+
+  window.speechSynthesis.speak(utterance);
+}
+
+function startReview() {
+  state.reviewPlaying = true;
+  state.reviewPaused = false;
+  document.getElementById('reviewPlayBtn').style.display = 'none';
+  document.getElementById('reviewPauseBtn').style.display = '';
+  document.getElementById('reviewPauseBtn').textContent = '⏸ 暂停';
+  speakCurrentStudent();
+}
+
+function pauseReview() {
+  state.reviewPaused = true;
+  if (state.reviewTimer) {
+    clearTimeout(state.reviewTimer);
+    state.reviewTimer = null;
+  }
+  window.speechSynthesis.pause();
+  document.getElementById('reviewPauseBtn').textContent = '▶ 继续';
+}
+
+function resumeReview() {
+  state.reviewPaused = false;
+  window.speechSynthesis.resume();
+  document.getElementById('reviewPauseBtn').textContent = '⏸ 暂停';
+}
+
+function stopReview() {
+  state.reviewPlaying = false;
+  state.reviewPaused = false;
+  if (state.reviewTimer) {
+    clearTimeout(state.reviewTimer);
+    state.reviewTimer = null;
+  }
+  window.speechSynthesis.cancel();
+  document.getElementById('reviewPlayBtn').style.display = '';
+  document.getElementById('reviewPauseBtn').style.display = 'none';
+}
+
+function toggleReviewPlay() {
+  if (!state.reviewPlaying) {
+    startReview();
+  } else if (state.reviewPaused) {
+    resumeReview();
+  } else {
+    pauseReview();
+  }
+}
+
+function nextReview() {
+  window.speechSynthesis.cancel();
+  if (state.reviewTimer) {
+    clearTimeout(state.reviewTimer);
+    state.reviewTimer = null;
+  }
+  var scored = getScoredStudents();
+  if (scored.length === 0) return;
+  // Find the next scored student after current index
+  var currentPos = -1;
+  for (var i = 0; i < scored.length; i++) {
+    if (scored[i] === state.reviewIndex) {
+      currentPos = i;
+      break;
+    }
+  }
+  var nextPos = (currentPos + 1) % scored.length;
+  state.reviewIndex = scored[nextPos];
+  buildReviewList();
+}
+
+function prevReview() {
+  window.speechSynthesis.cancel();
+  if (state.reviewTimer) {
+    clearTimeout(state.reviewTimer);
+    state.reviewTimer = null;
+  }
+  var scored = getScoredStudents();
+  if (scored.length === 0) return;
+  var currentPos = -1;
+  for (var i = 0; i < scored.length; i++) {
+    if (scored[i] === state.reviewIndex) {
+      currentPos = i;
+      break;
+    }
+  }
+  var prevPos = (currentPos - 1 + scored.length) % scored.length;
+  state.reviewIndex = scored[prevPos];
+  buildReviewList();
+}
 
 // Keyboard shortcut: Space to toggle mic
 document.addEventListener('keydown', (e) => {
