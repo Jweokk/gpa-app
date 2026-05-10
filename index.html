@@ -701,6 +701,13 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
         <span class="text-sm" style="color:var(--gray-400)">识别结果将显示在这里...</span>
       </div>
 
+      <!-- Manual input for sequential mode -->
+      <div class="manual-input-row" id="manualInputArea" style="display:none">
+        <input type="text" class="manual-input" id="manualInput" placeholder="录入多个数字，用空格或逗号分隔" onkeydown="if(event.key==='Enter')applyManualInput()">
+        <button class="btn-primary" onclick="applyManualInput()" style="padding:6px 14px;font-size:13px">填入</button>
+        <button class="btn-secondary" onclick="pasteManualInput()" style="padding:6px 10px;font-size:13px" title="从剪贴板粘贴">📋</button>
+      </div>
+
       <!-- Match Result -->
       <div class="match-result" id="matchResult"></div>
 
@@ -1527,6 +1534,7 @@ function switchMode(mode) {
   var micBtn = document.getElementById('micBtn');
   var micStatus = document.getElementById('micStatus');
   var reviewPanel = document.getElementById('reviewPanel');
+  var manualInputArea = document.getElementById('manualInputArea');
 
   // Stop any ongoing review when leaving review mode
   if (mode !== 'review') {
@@ -1544,6 +1552,7 @@ function switchMode(mode) {
     hint.innerHTML = '📝 批量：一次性读「姓名+成绩」自动匹配录入。<br>例：<kbd>张三 85，李四 92</kbd><br>提示：浏览器需允许麦克风权限；说得清晰、语速均匀效果最佳';
     document.getElementById('micStatus').textContent = '点击开始录入';
     state.currentHighlight = null;
+    manualInputArea.style.display = 'none';
   } else if (mode === 'sequential') {
     vBtn.className = 'mode-tab';
     sBtn.className = 'mode-tab active';
@@ -1561,7 +1570,9 @@ function switchMode(mode) {
     }
     state.sequentialIndex = first;
     state.currentHighlight = first;
-    hint.innerHTML = '📋 顺序：按学生名单顺序朗读分数，每个数字后停顿一下。<br>例：<kbd>85 92 78</kbd> 自动填入前三位学生<br>提示：点击左侧名单可切换起始学生';
+    hint.innerHTML = '📋 顺序：按学生名单顺序朗读分数，每个数字后停顿一下。<br>例：<kbd>85 92 78</kbd> 自动填入前三位学生<br>提示：点击左侧名单可切换起始学生；也可在下方输入框粘贴数字';
+    // Show manual input area
+    manualInputArea.style.display = 'flex';
     // Auto-start
     startRecognition();
     renderAll();
@@ -1572,6 +1583,7 @@ function switchMode(mode) {
     // Hide mic area, show review panel
     micBtn.style.display = 'none';
     micStatus.style.display = 'none';
+    manualInputArea.style.display = 'none';
     hint.innerHTML = '🔊 核对：点击「朗读」播报已录入成绩，可调间隔，核对是否与手头一致';
     hint.style.display = '';
     reviewPanel.style.display = '';
@@ -2134,6 +2146,37 @@ function onRosterClick(event, idx) {
     }
     renderAll();
   }
+}
+
+// Manual input for sequential mode
+function applyManualInput() {
+  var input = document.getElementById('manualInput');
+  var text = input.value.trim();
+  if (!text) { showToast('请输入数字', 'warning'); return; }
+  // Convert Chinese digits and extract numbers
+  text = text.replace(/[零〇]/g,'0').replace(/[一二壹]/g,'1')
+    .replace(/[二贰]/g,'2').replace(/[三叁]/g,'3')
+    .replace(/[四肆]/g,'4').replace(/[五伍]/g,'5')
+    .replace(/[六陆]/g,'6').replace(/[七柒]/g,'7')
+    .replace(/[八捌]/g,'8').replace(/[九玖]/g,'9')
+    .replace(/[十拾]/g,'10');
+  var nums = [];
+  var re = /(\d+(?:\.\d+)?)/g;
+  var m;
+  while ((m = re.exec(text)) !== null) nums.push(parseFloat(m[1]));
+  if (nums.length === 0) { showToast('未识别到数字', 'warning'); return; }
+  input.value = '';
+  // Feed to processSequential which already handles sequential filling
+  processSequential(nums.join(' '));
+}
+
+function pasteManualInput() {
+  navigator.clipboard.readText().then(function(text) {
+    document.getElementById('manualInput').value = text;
+    applyManualInput();
+  }).catch(function() {
+    showToast('粘贴失败，请手动输入', 'warning');
+  });
 }
 
 // Keyboard shortcut: Space to toggle mic
