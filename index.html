@@ -2286,7 +2286,7 @@ function listenGuidedName() {
   state.recognition.interimResults = false;
   state.accumulatedText = '';
   state.fullTranscript = '';
-  // Override onresult for name detection
+  // Override onresult for name detection - process immediately when final result arrives
   state.recognition.onresult = function(event) {
     var final = '';
     for (var i = event.resultIndex; i < event.results.length; i++) {
@@ -2294,12 +2294,15 @@ function listenGuidedName() {
     }
     if (final) {
       state.accumulatedText += final;
+      // Process immediately - Chrome fires onresult before onend with continuous=false
+      var name = state.accumulatedText.trim();
+      if (name) {
+        state.accumulatedText = '';
+        processGuidedName(name);
+      }
     }
-    state.fullTranscript = state.accumulatedText;
-    var box = document.getElementById('transcriptBox');
-    box.innerHTML = '<span class="name-part">' + escapeHtml(state.accumulatedText) + '</span>';
   };
-  // Override onend for processing
+  // onend is backup - if onresult already processed, this is a no-op
   state.recognition.onend = function() {
     if (state.mode !== 'guided') return;
     // If we have text, process it. Otherwise keep listening.
@@ -2393,11 +2396,14 @@ function listenGuidedScore() {
     }
     if (final) {
       state.accumulatedText += final;
+      var scoreText = state.accumulatedText.trim();
+      if (scoreText) {
+        state.accumulatedText = '';
+        processGuidedScore(scoreText);
+      }
     }
-    state.fullTranscript = state.accumulatedText;
-    var box = document.getElementById('transcriptBox');
-    box.innerHTML = '成绩: <span class="name-part">' + escapeHtml(state.accumulatedText) + '</span>';
   };
+  // onend is backup - if onresult already processed, this is a no-op
   state.recognition.onend = function() {
     if (state.mode !== 'guided') return;
     var txt = state.accumulatedText.trim();
