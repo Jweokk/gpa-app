@@ -1138,6 +1138,7 @@ function extractPairs(text) {
 
 function processBatch() {
   var text = (state.fullTranscript || state.accumulatedText || '').trim();
+  console.log('[Batch] input text:', text);
   if (!text) {
     showToast('没有识别到语音内容', 'warning');
     return;
@@ -1145,7 +1146,24 @@ function processBatch() {
 
   var pairs = extractPairs(text);
   if (pairs.length === 0) {
-    showToast('未识别到有效的「姓名+成绩」组合。请说：张三 85，李四 92 之类的格式', 'warning');
+    // Fallback: maybe Chrome only recognized numbers (dropped the Chinese names)
+    var loneNumbers = [];
+    var numRe = /(\d+(?:\.\d+)?)/g;
+    var nm;
+    while ((nm = numRe.exec(text)) !== null) {
+      loneNumbers.push(parseFloat(nm[1]));
+    }
+    if (loneNumbers.length > 0) {
+      console.warn('[Batch] No name+score pairs found, only numbers:', loneNumbers, 'text:', text);
+      showToast(
+        '⚠️ 只识别到数字，未识别到姓名。请尝试慢速朗读「' +
+        (state.students.filter(function(s) { return s.score === null || s.score === undefined; })[0]?.name || '姓名') +
+        ' 75」这样的格式',
+        'warning'
+      );
+    } else {
+      showToast('未识别到有效的「姓名+成绩」组合。请说：张三 85，李四 92 之类的格式', 'warning');
+    }
     return;
   }
 
@@ -1512,10 +1530,14 @@ stopRecognition = function() {
   } else {
     // Sequential: process whatever was accumulated
     if (state.accumulatedText.trim()) {
+      console.log('[Sequential] processing:', state.accumulatedText);
       processSequential(state.accumulatedText);
     }
     state.accumulatedText = '';
     state.fullTranscript = '';
+    // Update mic status after processing (don't leave it on "处理中...")
+    document.getElementById('micStatus').textContent = '点击开始录入，说多个数字自动填入';
+    document.getElementById('micStatus').className = 'mic-status';
   }
 };
 
