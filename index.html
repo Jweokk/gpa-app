@@ -663,7 +663,7 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   <p>拖拽或点击选择 .xlsx / .xls 文件<br>第一列应为学生姓名</p>
   <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
 </div>
-<p style="font-size:12px;color:var(--gray-500);margin-top:6px" id="uploadHelp">Excel 格式：第一列为学生姓名（第1行为表头）。<br>例：姓名 │ 张三 │ 李四</p>
+<p style="font-size:12px;color:var(--gray-500);margin-top:6px" id="uploadHelp">Excel 格式：第一列为学生姓名（第1行为表头）。<br>例：<br>姓名<br>张三<br>李四</p>
 
 <!-- Main Grid -->
 <div class="main-grid" id="mainApp" style="display:none">
@@ -1289,7 +1289,7 @@ function initRecognition() {
 
   r.onerror = (event) => {
     console.error('Speech error:', event.error);
-    if (event.error === 'no-speech') return;
+    if (event.error === 'no-speech' || event.error === 'aborted') return;
     showToast('语音识别错误: ' + event.error, 'error');
     stopRecognition();
   };
