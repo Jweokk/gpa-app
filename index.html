@@ -1821,6 +1821,9 @@ startRecognition = function() {
   }
   state.recognition = initRecognition();
   if (!state.recognition) return;
+  // Guided mode: non-continuous so onend fires after each utterance
+  state.recognition.continuous = false;
+  state.recognition.interimResults = false;
 
   state.accumulatedText = '';
   state.fullTranscript = '';
@@ -1856,6 +1859,9 @@ function startRecognition() {
   }
   state.recognition = initRecognition();
   if (!state.recognition) return;
+  // Guided mode: non-continuous so onend fires after each utterance
+  state.recognition.continuous = false;
+  state.recognition.interimResults = false;
 
   state.accumulatedText = '';
   state.fullTranscript = '';
@@ -2275,6 +2281,9 @@ function listenGuidedName() {
   }
   state.recognition = initRecognition();
   if (!state.recognition) return;
+  // Guided mode: non-continuous so onend fires after each utterance
+  state.recognition.continuous = false;
+  state.recognition.interimResults = false;
   state.accumulatedText = '';
   state.fullTranscript = '';
   // Override onresult for name detection
@@ -2372,6 +2381,9 @@ function listenGuidedScore() {
   }
   state.recognition = initRecognition();
   if (!state.recognition) return;
+  // Guided mode: non-continuous so onend fires after each utterance
+  state.recognition.continuous = false;
+  state.recognition.interimResults = false;
   state.accumulatedText = '';
   state.fullTranscript = '';
   state.recognition.onresult = function(event) {
@@ -2388,8 +2400,10 @@ function listenGuidedScore() {
   };
   state.recognition.onend = function() {
     if (state.mode !== 'guided') return;
-    if (state.accumulatedText.trim()) {
-      processGuidedScore(state.accumulatedText);
+    var txt = state.accumulatedText.trim();
+    console.log('[Guided] score onend, text:', JSON.stringify(txt));
+    if (txt) {
+      processGuidedScore(txt);
       state.accumulatedText = '';
     } else {
       try { state.recognition.start(); } catch(e) {}
