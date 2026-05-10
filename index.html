@@ -966,10 +966,10 @@ function renderRoster() {
     const seqClass = state.mode === 'sequential' && state.sequentialIndex === s.idx ? ' current' : '';
     const selClass = state.selectedStudents.has(s.idx) ? ' selected' : '';
     const checked = state.selectedStudents.has(s.idx) ? 'checked' : '';
-    html += `<tr class="${rowClass}${hlClass}${seqClass}${selClass}" data-idx="${s.idx}">
+    html += `<tr class="${rowClass}${hlClass}${seqClass}${selClass}" data-idx="${s.idx}" onclick="onRosterClick(event,${s.idx})">
       <td>${s.idx + 1}</td>
       <td><input type="checkbox" class="sel-checkbox" data-idx="${s.idx}" onchange="toggleStudentSelection(${s.idx})" ${checked}>${s.name}</td>
-      <td class="score-cell ${isDone ? 'done' : ''}" onclick="editScore(${s.idx})" style="cursor:pointer">${isDone ? s.score : '—'}</td>
+      <td class="score-cell ${isDone ? 'done' : ''}" onclick="event.stopPropagation();editScore(${s.idx})" style="cursor:pointer">${isDone ? s.score : '—'}</td>
       <td class="status-icon">${isDone ? '✅' : (state.mode === 'sequential' && state.sequentialIndex === s.idx ? '🎤' : '⏳')}</td>
     </tr>`;
   }
@@ -1203,6 +1203,10 @@ function initRecognition() {
   r.onend = function() {
     if (state.recognizing) {
       try { r.start(); } catch(e) {}
+    } else if (state.mode === 'sequential' && state.accumulatedText.trim()) {
+      processSequential(state.accumulatedText);
+      state.accumulatedText = '';
+      state.fullTranscript = '';
     }
   };
 
@@ -1580,7 +1584,6 @@ function processSequential(text) {
     if (idx >= state.students.length) break;
 
     applyScore(idx, numbers[n]);
-    showToast(state.students[idx].name + ' = ' + numbers[n] + ' ✅', 'success');
     applied++;
     idx++;
   }
@@ -1653,15 +1656,11 @@ stopRecognition = function() {
 
   if (state.mode === 'voice') {
     processBatch();
-  } else {
-    // Sequential: process whatever was accumulated
-    if (state.accumulatedText.trim()) {
-      console.log('[Sequential] processing:', state.accumulatedText);
-      processSequential(state.accumulatedText);
-    }
     state.accumulatedText = '';
     state.fullTranscript = '';
-    // Update mic status after processing (don't leave it on "处理中...")
+  } else {
+    // Sequential: onend handler will call processSequential after stop()
+    // Just update UI status
     document.getElementById('micStatus').textContent = '点击开始录入，说多个数字自动填入';
     document.getElementById('micStatus').className = 'mic-status';
   }
@@ -2056,6 +2055,17 @@ function updateSelCount() {
   const el = document.getElementById('selCount');
   if (el) {
     el.textContent = state.selectedStudents.size;
+  }
+}
+
+// Click on roster row to set sequential start position
+function onRosterClick(event, idx) {
+  if (event.target.tagName === 'INPUT') return; // ignore checkbox clicks
+  if (event.target.closest('.score-cell')) return; // ignore score edit clicks
+  if (state.mode === 'sequential') {
+    state.sequentialIndex = idx;
+    state.currentHighlight = idx;
+    renderAll();
   }
 }
 
