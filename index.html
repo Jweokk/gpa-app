@@ -649,6 +649,7 @@ header h1 small { font-size: 14px; font-weight: 400; color: var(--gray-400); mar
   <p>拖拽或点击选择 .xlsx / .xls 文件<br>第一列应为学生姓名</p>
   <input type="file" id="fileInput" accept=".xlsx,.xls" hidden>
 </div>
+<p style="font-size:12px;color:var(--gray-500);margin-top:6px">Excel 格式：第一列为学生姓名（第1行为表头），可含成绩列。例：<br>姓名 │ 成绩<br>张三 │ 85<br>李四 │ 92</p>
 
 <!-- Main Grid -->
 <div class="main-grid" id="mainApp" style="display:none">
@@ -1540,7 +1541,7 @@ function switchMode(mode) {
     vBtn.className = 'mode-tab active';
     sBtn.className = 'mode-tab';
     rBtn.className = 'mode-tab';
-    hint.innerHTML = '📝 批量模式：朗读 <kbd>张三 85，李四 92</kbd> 一次性读完';
+    hint.innerHTML = '📝 批量：一次性读「姓名+成绩」自动匹配录入。<br>例：<kbd>张三 85，李四 92</kbd><br>提示：浏览器需允许麦克风权限；说得清晰、语速均匀效果最佳';
     document.getElementById('micStatus').textContent = '点击开始录入';
     state.currentHighlight = null;
   } else if (mode === 'sequential') {
@@ -1560,7 +1561,7 @@ function switchMode(mode) {
     }
     state.sequentialIndex = first;
     state.currentHighlight = first;
-    hint.innerHTML = '📋 顺序模式：点击左侧选择起始学生，每个数字后停顿一下 <kbd>85</kbd> 自动填到后续学生';
+    hint.innerHTML = '📋 顺序：按学生名单顺序朗读分数，每个数字后停顿一下。<br>例：<kbd>85 92 78</kbd> 自动填入前三位学生<br>提示：点击左侧名单可切换起始学生';
     // Auto-start
     startRecognition();
     renderAll();
@@ -1571,7 +1572,8 @@ function switchMode(mode) {
     // Hide mic area, show review panel
     micBtn.style.display = 'none';
     micStatus.style.display = 'none';
-    hint.style.display = 'none';
+    hint.innerHTML = '🔊 核对：点击「朗读」播报已录入成绩，可调间隔，核对是否与手头一致';
+    hint.style.display = '';
     reviewPanel.style.display = '';
     state.reviewIndex = 0;
     state.currentHighlight = null;
