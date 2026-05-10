@@ -2478,19 +2478,9 @@ function confirmGuidedScore() {
   document.getElementById('guidedStepDisplay').textContent = '✅ 已录入 — ' + (s ? s.name : '') + ' = ' + state.guidedScoreValue;
   // Auto-advance to next ungraded student after short delay
   setTimeout(function() {
-    var next = -1;
-    for (var i = 0; i < state.students.length; i++) {
-      if (state.students[i].score === null || state.students[i].score === undefined) {
-        next = i; break;
-      }
-    }
-    if (next === -1) {
-      document.getElementById('guidedStepDisplay').textContent = '🎉 所有学生已录完';
-      document.getElementById('guidedStepName').style.display = 'none';
-      document.getElementById('guidedStepScore').style.display = 'none';
-      return;
-    }
-    // Reset for next student
+    // Reset for next student - always go back to name step
+    // Allows re-recording over existing scores
+    document.getElementById('guidedStepDisplay').textContent = '✅ 已录入 ' + (s ? s.name : '') + '，继续说下一个姓名';
     state.guidedStudentIdx = null;
     state.guidedScoreValue = null;
     document.getElementById('guidedStepName').style.display = '';
