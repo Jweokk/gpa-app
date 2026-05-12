@@ -1158,7 +1158,7 @@ function applyScore(studentIdx, score) {
   state.currentHighlight = null;
   state.lastResult = null;
   renderAll();
-  document.getElementById('matchResult').innerHTML = '';
+  if (state.mode !== 'voice') document.getElementById('matchResult').innerHTML = '';
   showToast(`${s.name} = ${score} ✅`, 'success');
 }
 
@@ -1357,8 +1357,13 @@ function extractPairs(text) {
   var results = [];
   // Clean up common fillers first
   text = text.replace(/[，。、；：\s,.;:\u3000]+/g, ' ');
+  // Convert Chinese number words to Arabic digits so regex can find name+digit
+  text = text.replace(/([\u4e00-\u9fff·]+)/g, function(m) {
+    var n = parseChineseNumber(m);
+    return isNaN(n) ? m : ' ' + n + ' ';
+  });
   // Match: CJK name chars → digits (score)
-  var regex = /([\u4e00-\u9fff·\u767e\u5343]{1,6})\s*(\d+(?:\.\d+)?)/g;
+  var regex = /([\u4e00-\u9fff·]{1,8})\s*(\d+(?:\.\d+)?)/g;
   var match;
   while ((match = regex.exec(text)) !== null) {
     var nameText = match[1].replace(/[的得了考了是]$/, '');
