@@ -1287,6 +1287,9 @@ function initRecognition() {
         if (idx < state.students.length) {
           document.getElementById('transcriptBox').innerHTML =
             '已填至: <span class="name-part">' + escapeHtml(state.students[idx].name) + '</span><br><span class="text-sm" style="color:var(--gray-400)">' + rawText + '</span>';
+        } else {
+          document.getElementById('transcriptBox').innerHTML =
+            '🎉 已全部录完<br><span class="text-sm" style="color:var(--gray-400)">' + rawText + '</span>';
         }
       }
     }
@@ -1294,9 +1297,13 @@ function initRecognition() {
     // Save full transcript (final + interim) for batch processing
     state.fullTranscript = state.accumulatedText + interim;
 
-    // Show live transcript
+    // Show live transcript (not in sequential mode - it has its own display)
     const box = document.getElementById('transcriptBox');
-    if (interim) {
+    if (state.mode === 'sequential') {
+      if (interim && box.innerHTML.indexOf('已填至') === -1) {
+        box.innerHTML = `<span class="name-part">${escapeHtml(state.accumulatedText)}</span><span class="highlight">${escapeHtml(interim)}</span>`;
+      }
+    } else if (interim) {
       box.innerHTML = `<span class="name-part">${escapeHtml(state.accumulatedText)}</span><span class="highlight">${escapeHtml(interim)}</span>`;
     } else if (state.accumulatedText) {
       box.innerHTML = `<span class="name-part">${escapeHtml(state.accumulatedText)}</span>`;
