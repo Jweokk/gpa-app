@@ -1378,15 +1378,84 @@ function extractPairs(text) {
       results.push({ nameText: nameText, score: score });
     }
   }
-  // Second pass: match CJK name + Chinese number words (e.g. "张三八十")
-  // Only runs if first pass found nothing (to avoid duplicate matches)
-  if (results.length === 0) {
-    while ((match = regexCN.exec(text)) !== null) {
-      var nameText = match[1].replace(/[的得了考了是]$/, '');
-      var score = parseChineseNumber(match[2]);
-      if (nameText && !isNaN(score)) {
-        results.push({ nameText: nameText, score: score });
+  // Second pass: anchor-based fallback using roster-driven name extraction
+  // "八十" → find anchor, look back up to 4 chars, match against roster
+  if (results.length === 0 && state.students && state.students.length > 0) {
+    results = extractByAnchor(text, state.students);
+  }
+  return results;
+}
+
+// Anchor-based name extraction: find numbers, look backwards, match roster
+function extractByAnchor(text, students) {
+  var results = [];
+  // Find all number anchors (digit groups + Chinese number word positions)
+  var anchors = [];
+  var reDigits = /(\d+(?:\.\d+)?)/g;
+  var m;
+  while ((m = reDigits.exec(text)) !== null) {
+    anchors.push({ pos: m.index, end: m.index + m[0].length, score: parseFloat(m[0]) });
+  }
+  // Also find Chinese number word positions (standalone)
+  var reCN = /([零一二三四五六七八九十百千万两]+)/g;
+  while ((m = reCN.exec(text)) !== null) {
+    var n = parseChineseNumber(m[1]);
+    if (!isNaN(n)) {
+      anchors.push({ pos: m.index, end: m.index + m[0].length, score: n, raw: m[1] });
+    }
+  }
+  // Sort anchors by position
+  anchors.sort(function(a, b) { return a.pos - b.pos; });
+
+  // For each anchor, look backwards to find best matching name
+  var prevBoundary = 0;
+  for (var ai = 0; ai < anchors.length; ai++) {
+    var anchor = anchors[ai];
+    var bestName = null;
+    var bestConf = 0;
+    var maxLen = Math.min(6, anchor.pos - prevBoundary);
+    // Try all possible name lengths (1 to maxLen chars before anchor)
+    for (var len = 1; len <= maxLen; len++) {
+      var nameStart = anchor.pos - len;
+      if (nameStart < prevBoundary) break;
+      var slice = text.substring(nameStart, anchor.pos);
+      // Clean up common fillers from the slice
+      var cleanName = slice.replace(/[的得了考了是]$/, '').trim();
+      if (!cleanName) continue;
+      // Match against roster
+      var candidates = findBestMatches(cleanName, students);
+      if (candidates && candidates.length > 0) {
+        var best = candidates[0];
+        // Confidence score: exact match gets bonus
+        var conf = best.score;
+        if (cleanName === best.name) conf = Math.max(conf, 98);
+        // Penalize if the slice is much longer than the matched name
+        var lenRatio = cleanName.length / best.name.length;
+        if (lenRatio > 1.5) conf *= 0.8;
+        // Penalize if slice has leftover chars after matched name
+        var nameIdx = cleanName.indexOf(best.name);
+        if (nameIdx >= 0 && nameIdx + best.name.length < cleanName.length) {
+          conf *= 0.7; // has trailing chars
+        }
+        if (conf > bestConf) {
+          bestConf = conf;
+          bestName = { name: best.name, idx: best.idx, method: methodLabel(best.method) };
+        }
       }
+    }
+    // Accept if confidence is reasonable (≥60), otherwise skip
+    if (bestName && bestConf >= 60) {
+      results.push({
+        nameText: bestName.name,
+        score: anchor.score,
+        anchorMatch: true,
+        confidence: bestConf,
+      });
+      // Mark the name as consumed by using a weighted boundary
+      // Move boundary to just before the matched name or anchor start
+      prevBoundary = anchor.pos;
+    } else {
+      prevBoundary = anchor.end;
     }
   }
   return results;
