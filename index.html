@@ -1359,20 +1359,34 @@ function extractPairs(text) {
   var results = [];
   // Clean up common fillers first
   text = text.replace(/[，。、；：\s,.;:\u3000]+/g, ' ');
-  // Convert Chinese number words (2+ chars) to Arabic digits before regex matching
-  // "八十"→80, "九十九"→99. Single digits like "四" in "李四" are left alone.
-  text = text.replace(/([一二三四五六七八九][零一二三四五六七八九十百千万]+)/g, function(m) {
-    var n = parseChineseNumber(m);
-    return isNaN(n) ? m : ' ' + n + ' ';
+  // Handle standalone Chinese number words: if the text has Chinese number word
+  // separated by spaces (e.g. "张三 八十 李四 92"), convert to digits first
+  // This does NOT match "张三八十" (no separator) which is ambiguous
+  text = text.replace(/(^|\s)([零一二三四五六七八九十百千万两]+)(?=\s|$)/g, function(m, before, num) {
+    var n = parseChineseNumber(num);
+    return isNaN(n) ? m : before + ' ' + n + ' ';
   });
   // Match: CJK name chars → digits (score). Supports circled digits ①-⑩
-  var regex = /([\u4e00-\u9fff·\u2460-\u2469]{1,8})\s*(\d+(?:\.\d+)?)/g;
+  // Negative lookahead prevents matching when name is actually part of longer text
+  // (e.g. "张三八十李四92" won't match "张三八十李四" as a name because "八" follows)
+  var regex = /([\u4e00-\u9fff·\u2460-\u2469]{1,6})(?![\u4e00-\u9fff·\u2460-\u2469])\s*(\d+(?:\.\d+)?)/g;
   var match;
   while ((match = regex.exec(text)) !== null) {
     var nameText = match[1].replace(/[的得了考了是]$/, '');
     var score = parseFloat(match[2]);
     if (nameText && !isNaN(score)) {
       results.push({ nameText: nameText, score: score });
+    }
+  }
+  // Second pass: match CJK name + Chinese number words (e.g. "张三八十")
+  // Only runs if first pass found nothing (to avoid duplicate matches)
+  if (results.length === 0) {
+    while ((match = regexCN.exec(text)) !== null) {
+      var nameText = match[1].replace(/[的得了考了是]$/, '');
+      var score = parseChineseNumber(match[2]);
+      if (nameText && !isNaN(score)) {
+        results.push({ nameText: nameText, score: score });
+      }
     }
   }
   return results;
