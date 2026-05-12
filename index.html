@@ -1359,15 +1359,14 @@ function extractPairs(text) {
   var results = [];
   // Clean up common fillers first
   text = text.replace(/[，。、；：\s,.;:\u3000]+/g, ' ');
-  // Convert Chinese number words to Arabic digits before regex matching
-  // Only matches pure number word sequences like "八十"→80, "九十九"→99
-  // Does NOT match names like "张三" (张 is not a number character)
-  text = text.replace(/([零一二三四五六七八九十百千万两]+)/g, function(m) {
+  // Convert Chinese number words (2+ chars) to Arabic digits before regex matching
+  // "八十"→80, "九十九"→99. Single digits like "四" in "李四" are left alone.
+  text = text.replace(/([一二三四五六七八九][零一二三四五六七八九十百千万]+)/g, function(m) {
     var n = parseChineseNumber(m);
     return isNaN(n) ? m : ' ' + n + ' ';
   });
-  // Match: CJK name chars → digits (score)
-  var regex = /([\u4e00-\u9fff·]{1,8})\s*(\d+(?:\.\d+)?)/g;
+  // Match: CJK name chars → digits (score). Supports circled digits ①-⑩
+  var regex = /([\u4e00-\u9fff·\u2460-\u2469]{1,8})\s*(\d+(?:\.\d+)?)/g;
   var match;
   while ((match = regex.exec(text)) !== null) {
     var nameText = match[1].replace(/[的得了考了是]$/, '');
