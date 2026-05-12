@@ -874,7 +874,7 @@ function findBestMatches(spoken, students) {
 
     // 2. Pinyin exact
     const spPinyin = getPinyin(spoken).join(' ');
-    const namePinyin = getPinyin(s.name).join(' ');
+    const namePinyin = s.namePinyin || getPinyin(s.name).join(' ');
     let sim = 0;
     let method = '';
 
@@ -978,6 +978,7 @@ function parseExcel(data, fileName) {
     state.students.push({
       idx: state.students.length,
       name,
+      namePinyin: getPinyin(name).join(' '),
       score: (existingScore !== null && !isNaN(existingScore)) ? existingScore : null,
       matched: existingScore !== null && !isNaN(existingScore),
     });
@@ -1311,6 +1312,42 @@ function escapeHtml(text) {
   var el = document.createElement('span');
   el.textContent = text;
   return el.innerHTML;
+}
+
+// Parse Chinese number words to integers (e.g. "八十五" → 85)
+// Handles scores 0-150 range, falls back to Arabic digit parsing
+function parseChineseNumber(text) {
+  // Try Arabic digits first
+  var m = text.match(/(\d+(?:\.\d+)?)/);
+  if (m) return parseFloat(m[1]);
+
+  // Normalize: remove fillers, "点"→".", "两"→"二"
+  var s = text.replace(/[零〇]/g,'0').replace(/[点]/g,'.')
+              .replace(/[两]/g,'二').replace(/[分\s]/g,'')
+              .replace(/^[的了给记]/,'');
+
+  // Pure digit-by-digit: "三三" or "八五" - each char is single digit
+  var onlyDigits = s.replace(/[^0-9一二三四五六七八九\.]/g, '');
+  if (onlyDigits && onlyDigits.length <= 4) {
+    var converted = onlyDigits;
+    converted = converted.replace(/一/g,'1').replace(/二/g,'2').replace(/三/g,'3')
+      .replace(/四/g,'4').replace(/五/g,'5').replace(/六/g,'6')
+      .replace(/七/g,'7').replace(/八/g,'8').replace(/九/g,'9');
+    var parsed = parseFloat(converted);
+    if (!isNaN(parsed)) return parsed;
+  }
+
+  // Standard Chinese number words: "八十五"→85, "一百零二"→102
+  var zhMap = { '零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
+  var result = 0, temp = 0;
+  for (var i = 0; i < s.length; i++) {
+    var c = s[i];
+    if (c === '百') { result += (temp === 0 ? 1 : temp) * 100; temp = 0; }
+    else if (c === '十') { result += (temp === 0 ? 1 : temp) * 10; temp = 0; }
+    else if (zhMap[c] !== undefined) temp = zhMap[c];
+  }
+  result += temp;
+  return result > 0 ? result : NaN;
 }
 
 // ─── Batch Processing ───────────────────────
@@ -2428,17 +2465,12 @@ function listenGuidedScore() {
 function processGuidedScore(text) {
   text = text.trim();
   if (!text) return;
-  // Convert Chinese digits
-  text = text.replace(/[零〇]/g,'0').replace(/[一二壹]/g,'1').replace(/[二贰]/g,'2')
-    .replace(/[三叁]/g,'3').replace(/[四肆]/g,'4').replace(/[五伍]/g,'5')
-    .replace(/[六陆]/g,'6').replace(/[七柒]/g,'7').replace(/[八捌]/g,'8')
-    .replace(/[九玖]/g,'9').replace(/[十拾]/g,'10');
-  var m = text.match(/(\d+(?:\.\d+)?)/);
-  if (!m) { 
+  // Parse Chinese/Arabic numbers: "八十五"→85, "92"→92
+  var score = parseChineseNumber(text);
+  if (isNaN(score)) { 
     showToast('未识别到数字，请重说', 'warning');
     return;
   }
-  var score = parseFloat(m[1]);
   state.guidedScoreValue = score;
   document.getElementById('guidedTimerDisplay').textContent = '⏱ ' + score;
   var timeout = parseFloat(document.getElementById('guidedInterval').value || 3) * 1000;
