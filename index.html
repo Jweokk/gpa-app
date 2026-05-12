@@ -1236,17 +1236,30 @@ function initRecognition() {
       // Sequential mode: real-time number extraction
       // Chrome Chinese ASR tends to merge digits, so extract numbers as they arrive
       if (state.mode === 'sequential') {
-        var seqText = final.replace(/[零〇]/g,'0').replace(/[一二壹]/g,'1')
-          .replace(/[二贰]/g,'2').replace(/[三叁]/g,'3')
-          .replace(/[四肆]/g,'4').replace(/[五伍]/g,'5')
-          .replace(/[六陆]/g,'6').replace(/[七柒]/g,'7')
-          .replace(/[八捌]/g,'8').replace(/[九玖]/g,'9')
-          .replace(/[十拾]/g,'10');
+        // Split by spaces/separators, parse each segment independently
+        var segments = final.split(/[\s,，、；;]+/);
         var newNums = [];
-        var nr = /(\d+(?:\.\d+)?)/g;
-        var nm;
-        while ((nm = nr.exec(seqText)) !== null) {
-          newNums.push(parseFloat(nm[1]));
+        for (var si = 0; si < segments.length; si++) {
+          var seg = segments[si].trim();
+          if (!seg) continue;
+          // Try parseChineseNumber first (handles "八十五"→85, "十"→10)
+          var n = parseChineseNumber(seg);
+          if (!isNaN(n)) {
+            newNums.push(n);
+          } else {
+            // Fallback: digit-by-digit Chinese conversion
+            var digitText = seg.replace(/[零〇]/g,'0').replace(/[一二壹]/g,'1')
+              .replace(/[二贰]/g,'2').replace(/[三叁]/g,'3')
+              .replace(/[四肆]/g,'4').replace(/[五伍]/g,'5')
+              .replace(/[六陆]/g,'6').replace(/[七柒]/g,'7')
+              .replace(/[八捌]/g,'8').replace(/[九玖]/g,'9')
+              .replace(/[十拾]/g,'10');
+            var nr = /(\d+(?:\.\d+)?)/g;
+            var nm;
+            while ((nm = nr.exec(digitText)) !== null) {
+              newNums.push(parseFloat(nm[1]));
+            }
+          }
         }
         // Apply any new numbers that haven't been applied yet
         var idx = state.sequentialIndex;
@@ -1269,9 +1282,11 @@ function initRecognition() {
         }
         state.sequentialIndex = idx;
         state.currentHighlight = idx < state.students.length ? idx : null;
+        // Show both raw transcript and status
+        var rawText = escapeHtml(state.accumulatedText || '');
         if (idx < state.students.length) {
           document.getElementById('transcriptBox').innerHTML =
-            '已填至: <span class="name-part">' + escapeHtml(state.students[idx].name) + '</span>';
+            '已填至: <span class="name-part">' + escapeHtml(state.students[idx].name) + '</span><br><span class="text-sm" style="color:var(--gray-400)">' + rawText + '</span>';
         }
       }
     }
@@ -1802,26 +1817,29 @@ function processSequential(text) {
   text = text.trim();
   if (!text) return;
 
-  // Convert Chinese number characters to digits
-  text = text.replace(/[零〇]/g, '0')
-    .replace(/[一二壹]/g, '1')
-    .replace(/[二贰]/g, '2')
-    .replace(/[三叁]/g, '3')
-    .replace(/[四肆]/g, '4')
-    .replace(/[五伍]/g, '5')
-    .replace(/[六陆]/g, '6')
-    .replace(/[七柒]/g, '7')
-    .replace(/[八捌]/g, '8')
-    .replace(/[九玖]/g, '9')
-    .replace(/[十拾]/g, '10');
-
-  // Extract ALL numbers from the accumulated speech
+  // Split by separators, parse each segment with parseChineseNumber
   var numbers = [];
-  var m;
-  // Match both Arabic digits and already-converted "10" from 十
-  var numRegex = /(\d+(?:\.\d+)?)/g;
-  while ((m = numRegex.exec(text)) !== null) {
-    numbers.push(parseFloat(m[1]));
+  var segments = text.split(/[\s,，、；;]+/);
+  for (var si = 0; si < segments.length; si++) {
+    var seg = segments[si].trim();
+    if (!seg) continue;
+    var n = parseChineseNumber(seg);
+    if (!isNaN(n)) {
+      numbers.push(n);
+    } else {
+      // Fallback: digit-by-digit conversion
+      var dt = seg.replace(/[零〇]/g,'0').replace(/[一二壹]/g,'1')
+        .replace(/[二贰]/g,'2').replace(/[三叁]/g,'3')
+        .replace(/[四肆]/g,'4').replace(/[五伍]/g,'5')
+        .replace(/[六陆]/g,'6').replace(/[七柒]/g,'7')
+        .replace(/[八捌]/g,'8').replace(/[九玖]/g,'9')
+        .replace(/[十拾]/g,'10');
+      var nr = /(\d+(?:\.\d+)?)/g;
+      var nm;
+      while ((nm = nr.exec(dt)) !== null) {
+        numbers.push(parseFloat(nm[1]));
+      }
+    }
   }
 
   // Skip command: if only skip keywords and no numbers, skip current student
