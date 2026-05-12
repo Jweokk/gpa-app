@@ -1320,8 +1320,10 @@ function initRecognition() {
   r.onend = function() {
     if (state.recognizing) {
       try { r.start(); } catch(e) {}
-    } else if (state.mode === 'sequential' && state.accumulatedText.trim()) {
-      processSequential(state.accumulatedText);
+      return;
+    }
+    // Clean up accumulated text on stop — onresult already handled it
+    if (state.mode === 'sequential') {
       state.accumulatedText = '';
       state.fullTranscript = '';
     }
@@ -1381,6 +1383,8 @@ function extractPairs(text) {
   var results = [];
   // Clean up common fillers first
   text = text.replace(/[，。、；：\s,.;:\u3000]+/g, ' ');
+  // Join adjacent CJK chars separated by spaces (Chrome ASR quirk: "张 三 85" → "张三 85")
+  text = text.replace(/([\u4e00-\u9fff])\s+(?=[\u4e00-\u9fff])/g, '$1');
   // Handle standalone Chinese number words: if the text has Chinese number word
   // separated by spaces (e.g. "张三 八十 李四 92"), convert to digits first
   // This does NOT match "张三八十" (no separator) which is ambiguous
@@ -1400,10 +1404,26 @@ function extractPairs(text) {
       results.push({ nameText: nameText, score: score });
     }
   }
-  // Second pass: anchor-based fallback using roster-driven name extraction
-  // "八十" → find anchor, look back up to 4 chars, match against roster
-  if (results.length === 0 && state.students && state.students.length > 0) {
-    results = extractByAnchor(text, state.students);
+  // Second pass: always run anchor-based extraction, merge with regex results
+  // Anchor handles Chrome ASR's per-character spacing ("张 三 85" → "张三" + 85)
+  if (state.students && state.students.length > 0) {
+    var anchorResults = extractByAnchor(text, state.students);
+    if (results.length === 0) {
+      results = anchorResults;
+    } else if (anchorResults.length > 0) {
+      // Merge: deduplicate by (nameText, score), prefer anchor (roster-aware)
+      var seen = {};
+      for (var ri = 0; ri < results.length; ri++) {
+        seen[results[ri].nameText + '|' + results[ri].score] = true;
+      }
+      for (var ai = 0; ai < anchorResults.length; ai++) {
+        var key = anchorResults[ai].nameText + '|' + anchorResults[ai].score;
+        if (!seen[key]) {
+          results.push(anchorResults[ai]);
+          seen[key] = true;
+        }
+      }
+    }
   }
   return results;
 }
@@ -1442,7 +1462,7 @@ function extractByAnchor(text, students) {
       if (nameStart < prevBoundary) break;
       var slice = text.substring(nameStart, anchor.pos);
       // Clean up common fillers from the slice
-      var cleanName = slice.replace(/[的得了考了是]$/, '').trim();
+      var cleanName = slice.replace(/[的得了考了是]$/, '').replace(/\s+/g, '').trim();
       if (!cleanName) continue;
       // Match against roster
       var candidates = findBestMatches(cleanName, students);
