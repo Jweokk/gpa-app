@@ -1321,23 +1321,25 @@ function parseChineseNumber(text) {
   var m = text.match(/(\d+(?:\.\d+)?)/);
   if (m) return parseFloat(m[1]);
 
-  // Normalize: remove fillers, "点"→".", "两"→"二"
-  var s = text.replace(/[零〇]/g,'0').replace(/[点]/g,'.')
-              .replace(/[两]/g,'二').replace(/[分\s]/g,'')
+  // Normalize: "点"→".", "两"→"二"
+  var s = text.replace(/[点]/g,'.').replace(/[两]/g,'二').replace(/[分\s]/g,'')
               .replace(/^[的了给记]/,'');
 
-  // Pure digit-by-digit: "三三" or "八五" - each char is single digit
-  var onlyDigits = s.replace(/[^0-9一二三四五六七八九\.]/g, '');
-  if (onlyDigits && onlyDigits.length <= 4) {
-    var converted = onlyDigits;
+  // Reject if text contains non-number Chinese characters (e.g. "张三八十")
+  if (!/^[零〇一二三四五六七八九十百千万两\.0-9]+$/.test(s)) return NaN;
+
+  // Pure digit-by-digit: "三三" → 33, "八五" → 85
+  if (/^[0-9一二三四五六七八九]+$/.test(s) && s.length <= 4) {
+    var converted = s;
     converted = converted.replace(/一/g,'1').replace(/二/g,'2').replace(/三/g,'3')
       .replace(/四/g,'4').replace(/五/g,'5').replace(/六/g,'6')
       .replace(/七/g,'7').replace(/八/g,'8').replace(/九/g,'9');
     var parsed = parseFloat(converted);
-    if (!isNaN(parsed)) return parsed;
+    if (!isNaN(parsed) && parsed <= 150) return parsed;
   }
 
   // Standard Chinese number words: "八十五"→85, "一百零二"→102
+  s = s.replace(/[零〇]/g,'0').replace(/[^0-9一二三四五六七八九十百]/g,'');
   var zhMap = { '零':0,'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9 };
   var result = 0, temp = 0;
   for (var i = 0; i < s.length; i++) {
@@ -1357,8 +1359,10 @@ function extractPairs(text) {
   var results = [];
   // Clean up common fillers first
   text = text.replace(/[，。、；：\s,.;:\u3000]+/g, ' ');
-  // Convert Chinese number words to Arabic digits so regex can find name+digit
-  text = text.replace(/([\u4e00-\u9fff·]+)/g, function(m) {
+  // Convert Chinese number words to Arabic digits before regex matching
+  // Only matches pure number word sequences like "八十"→80, "九十九"→99
+  // Does NOT match names like "张三" (张 is not a number character)
+  text = text.replace(/([零一二三四五六七八九十百千万两]+)/g, function(m) {
     var n = parseChineseNumber(m);
     return isNaN(n) ? m : ' ' + n + ' ';
   });
