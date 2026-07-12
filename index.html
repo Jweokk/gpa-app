@@ -2517,6 +2517,8 @@ function listenGuidedName() {
   // onend is backup - if onresult already processed, this is a no-op
   state.recognition.onend = function() {
     if (state.mode !== 'guided') return;
+    // 如果识别已被错误处理停止，不要再重启（否则会无限循环）
+    if (!state.recognizing) return;
     // If we have text, process it. Otherwise keep listening.
     if (state.accumulatedText.trim()) {
       processGuidedName(state.accumulatedText);
@@ -2619,6 +2621,8 @@ function listenGuidedScore() {
   // onend is backup - if onresult already processed, this is a no-op
   state.recognition.onend = function() {
     if (state.mode !== 'guided') return;
+    // 如果识别已被错误处理停止，不要再重启（否则会无限循环）
+    if (!state.recognizing) return;
     var txt = state.accumulatedText.trim();
     console.log('[Guided] score onend, text:', JSON.stringify(txt));
     if (txt) {
