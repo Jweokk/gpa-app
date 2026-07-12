@@ -1310,11 +1310,45 @@ function initRecognition() {
     }
   };
 
+  r._retryCount = 0;
+  r._maxRetries = 3;
   r.onerror = (event) => {
-    console.error('Speech error:', event.error);
+    console.error('Speech error:', event.error, '(retry:', r._retryCount, '/', r._maxRetries, ')');
     if (event.error === 'no-speech' || event.error === 'aborted') return;
+    // network 错误通常是暂时的（Google ASR 在部分地区不稳定），自动重试
+    if (event.error === 'network' && r._retryCount < r._maxRetries) {
+      r._retryCount++;
+      var delay = Math.min(1000 * r._retryCount, 3000);
+      showToast('语音识别网络不稳定，正在重试 (' + r._retryCount + '/' + r._maxRetries + ')', 'warning');
+      setTimeout(function() {
+        try { r.start(); } catch(e) { console.error('Retry start failed:', e); }
+      }, delay);
+      return;
+    }
+    // 在引导模式下，不要调 stopRecognition (它调 processBatch 只适合批量模式)
+    if (state.mode === 'guided') {
+      showToast('语音识别错误，请重试', 'error');
+      document.getElementById('guidedStepDisplay').textContent = '❌ 语音识别出错';
+      var isScoreStep = state.guidedScoreStep;
+      if (isScoreStep) {
+        document.getElementById('guidedNameResult').innerHTML = '';
+        document.getElementById('guidedNameCands').innerHTML =
+          '<button class="btn-primary" onclick="listenGuidedScore()" style="padding:6px 16px">🎤 重说成绩</button>' +
+          '<button class="btn-secondary" onclick="retryGuidedScore()" style="padding:6px 16px">✏️ 手动输入</button>';
+      } else {
+        document.getElementById('guidedNameResult').innerHTML = '❌ 语音识别失败，请重试';
+        document.getElementById('guidedNameCands').innerHTML =
+          '<button class="btn-primary" onclick="listenGuidedName()" style="padding:6px 16px">🎤 重试</button>';
+      }
+      state.recognizing = false;
+      try { r.stop(); } catch(e) {}
+      return;
+    }
     showToast('语音识别错误: ' + event.error, 'error');
-    stopRecognition();
+    if (state.recognizing) {
+      state.recognizing = false;
+      try { r.stop(); } catch(e) {}
+    }
   };
 
   r.onend = function() {
@@ -2446,6 +2480,7 @@ function startGuided() {
 }
 
 function listenGuidedName() {
+  state.guidedScoreStep = false;
   document.getElementById('guidedStepDisplay').textContent = '🎤 请说学生姓名';
   document.getElementById('guidedStepName').style.display = '';
   document.getElementById('guidedStepScore').style.display = 'none';
@@ -2547,6 +2582,7 @@ function listenGuidedScore() {
   if (state.guidedStudentIdx === null) return;
   var s = state.students[state.guidedStudentIdx];
   if (!s) return;
+  state.guidedScoreStep = true;
   document.getElementById('guidedStepDisplay').textContent = '🎤 请说 ' + s.name + ' 的成绩';
   document.getElementById('guidedStepName').style.display = 'none';
   document.getElementById('guidedStepScore').style.display = '';
